@@ -301,7 +301,24 @@ function connectToHost(code, { onOpen, onFail } = {}) {
 function handleClientData(data) {
     const { type, payload } = data;
     if (type === 'SYNC_STATE') {
+        const prevState = room.voteState;
         room = payload;
+
+        // 新ラウンド判定：Hostから実際に状態を受信した時だけ判定する
+        // （ローカルのUI操作でupdateVoteUIを呼んだ時には発火させない）
+        const isFreshRoundStart =
+            room.voteState === 'VOTING' &&
+            room.votes.length === 0 &&
+            (prevState === 'ENDED' || prevState === 'WAITING');
+
+        if (isFreshRoundStart) {
+            voteSubmittedLocally = false;
+            lastShownWinnerId = null;
+            selectedVotePlayerId = null;
+            const banner = document.getElementById('vote-result-banner');
+            if (banner) banner.innerHTML = '';
+        }
+
         updateVoteUI();
     }
 }
@@ -430,15 +447,6 @@ function processVoteResult(winnerId) {
 function updateVoteUI() {
     const badge = document.getElementById('vote-state-badge');
     const submitBtn = document.getElementById('btn-submit-vote');
-    const banner = document.getElementById('vote-result-banner');
-
-    // 新ラウンド判定：Hostが投票データをリセットしたらローカルの送信フラグ・結果表示もクリア
-    if (room.votes.length === 0 && room.voteState !== 'ENDED') {
-        voteSubmittedLocally = false;
-        lastShownWinnerId = null;
-        selectedVotePlayerId = null;
-        if (banner) banner.innerHTML = '';
-    }
 
     const voted = hasVotedThisRound();
 
