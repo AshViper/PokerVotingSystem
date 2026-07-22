@@ -121,22 +121,29 @@ ViewerUI.prototype.render = function () {
   var self = this;
   this.container.innerHTML = [
     '<div class="viewer-view">',
-    '  <h1>Tournament Spectator</h1>',
+    '  <h1>🏆 Tournament Spectator</h1>',
     '  <div id="tournament-status-bar" class="status"></div>',
-    '  <div id="tournament-info"></div>',
-    '  <h2>Rankings</h2>',
-    '  <table id="viewer-ranking" style="width:100%;margin-bottom:16px">',
-    '    <tr><th>#</th><th>Name</th><th>Points</th></tr>',
-    '  </table>',
-    '  <h2>Live Match</h2>',
-    '  <div id="live-match-info">Waiting for match...</div>',
-    '  <h2>Bet Summary</h2>',
-    '  <div id="viewer-bet-summary"></div>',
-    '  <hr/>',
-    '  <h2>Vote on Players</h2>',
-    '  <div class="player-list" id="viewer-players"></div>',
-    '  <button id="viewer-vote-btn" disabled>Vote</button>',
-    '  <div id="viewer-results"></div>',
+    '  <div id="tournament-info" class="card"></div>',
+    '  <div class="card">',
+    '    <div class="card-header"><div class="section-label">🏆 Rankings</div></div>',
+    '    <table id="viewer-ranking" style="width:100%">',
+    '      <tr><th>#</th><th>Name</th><th>Points</th><th>Prediction</th></tr>',
+    '    </table>',
+    '  </div>',
+    '  <div class="card">',
+    '    <div class="card-header"><div class="section-label">⚔️ Live Match</div></div>',
+    '    <div id="live-match-info" class="subtitle" style="margin-bottom:0">Waiting for match...</div>',
+    '  </div>',
+    '  <div class="card">',
+    '    <div class="card-header"><div class="section-label">📊 Bet Summary</div></div>',
+    '    <div id="viewer-bet-summary"></div>',
+    '  </div>',
+    '  <div class="card">',
+    '    <div class="card-header"><div class="section-label">🗳️ Vote on Players</div></div>',
+    '    <div class="player-list" id="viewer-players"></div>',
+    '    <button id="viewer-vote-btn" class="btn btn-primary btn-block" style="margin-top:0.75rem" disabled>Vote</button>',
+    '    <div id="viewer-results"></div>',
+    '  </div>',
     '  <div id="viewer-status" class="status"></div>',
     '</div>'
   ].join('');
@@ -148,12 +155,13 @@ ViewerUI.prototype.render = function () {
 ViewerUI.prototype.updateTournamentState = function (state, rankings) {
   var infoEl = document.getElementById('tournament-info');
   if (infoEl) {
-    infoEl.innerHTML = '<p>Status: <strong>' + state.status + '</strong></p>';
+    var statusText = state.status === 'idle' ? '待機中' : state.status === 'predicting' ? '優勝予想受付中' : state.status === 'inProgress' ? '大会進行中' : state.status === 'finished' ? '大会終了' : state.status;
+    infoEl.innerHTML = '<p style="color:var(--text-secondary);margin-bottom:0">ステータス: <strong style="color:var(--text-primary)">' + statusText + '</strong></p>';
   }
   var statusBar = document.getElementById('tournament-status-bar');
   if (statusBar) {
-    statusBar.textContent = 'Tournament: ' + state.status;
-    statusBar.className = 'status connected';
+    statusBar.textContent = '🏆 Tournament: ' + statusText;
+    statusBar.className = 'status status-info';
   }
   if (rankings) this.updateRanking(rankings);
   this.updateLiveMatch(state);
@@ -161,9 +169,9 @@ ViewerUI.prototype.updateTournamentState = function (state, rankings) {
 ViewerUI.prototype.updateRanking = function (rankings) {
   var table = document.getElementById('viewer-ranking');
   if (!table) return;
-  table.innerHTML = '<tr><th>#</th><th>Name</th><th>Points</th></tr>' +
+  table.innerHTML = '<tr><th>#</th><th>Name</th><th>Points</th><th>Prediction</th></tr>' +
     rankings.map(function (r, i) {
-      return '<tr><td>' + (i + 1) + '</td><td>' + ViewerUI.escapeHtml(r.name) + '</td><td>' + r.points + '</td></tr>';
+      return '<tr><td>' + (i + 1) + '</td><td>' + ViewerUI.escapeHtml(r.name) + '</td><td style="font-weight:700;color:var(--accent-gold)">' + r.points + 'P</td><td style="color:var(--text-secondary);font-size:0.85rem">' + ViewerUI.escapeHtml(r.champPredictName || '-') + '</td></tr>';
     }).join('');
 };
 ViewerUI.prototype.updateLiveMatch = function (state) {
@@ -178,36 +186,43 @@ ViewerUI.prototype.updateLiveMatch = function (state) {
     }
   }
   if (!activeMatch) {
-    el.innerHTML = state.status === 'finished' ? '<p>Tournament finished!</p>' : '<p>No active match.</p>';
+    el.innerHTML = state.status === 'finished' ? '<span style="color:var(--accent-green)">🏆 Tournament finished!</span>' : '<span style="color:var(--text-muted)">No active match.</span>';
     return;
   }
   var p1Name = ViewerUI.getPlayerName(state.matchPlayers, activeMatch.player1Id);
   var p2Name = ViewerUI.getPlayerName(state.matchPlayers, activeMatch.player2Id);
-  var html = '<p><strong>' + ViewerUI.escapeHtml(p1Name) + ' vs ' + ViewerUI.escapeHtml(p2Name) + '</strong></p>';
-  html += '<p>Voting: ' + (activeMatch.votingOpen ? '<span style="color:#2ecc71">OPEN</span>' : '<span style="color:#e74c3c">CLOSED</span>') + '</p>';
+  var html = '<div class="matchup" style="margin:0 0 0.5rem;padding:0.75rem">';
+  html += '<span class="name">' + ViewerUI.escapeHtml(p1Name) + '</span><span class="vs">VS</span><span class="name">' + ViewerUI.escapeHtml(p2Name) + '</span>';
+  html += '</div>';
+  html += '<div class="status ' + (activeMatch.votingOpen ? 'status-success' : 'status-error') + '" style="margin-bottom:0">';
+  html += activeMatch.votingOpen ? '🟢 投票受付中' : '🔴 投票終了';
+  html += '</div>';
   if (activeMatch.winner) {
-    html += '<p>Winner: <strong>' + ViewerUI.escapeHtml(ViewerUI.getPlayerName(state.matchPlayers, activeMatch.winner)) + '</strong></p>';
+    html += '<div class="status status-success" style="margin-top:0.5rem;margin-bottom:0">🏆 Winner: <strong>' + ViewerUI.escapeHtml(ViewerUI.getPlayerName(state.matchPlayers, activeMatch.winner)) + '</strong></div>';
   }
   el.innerHTML = html;
 
   // ベット集計（簡易）
   var betEl = document.getElementById('viewer-bet-summary');
-  if (betEl && state.bets) {
-    // Note: bet summary is not in state broadcast; master has it
-    betEl.innerHTML = '<p>Check master screen for bet details.</p>';
+  if (betEl) {
+    betEl.innerHTML = '<p style="color:var(--text-muted);margin-bottom:0">ベット詳細はホスト画面をご確認ください。</p>';
   }
 };
 ViewerUI.prototype.updatePlayers = function (players) {
   var list = document.getElementById('viewer-players');
   if (list === null) return;
-  if (players.length === 0) { list.innerHTML = '<p>No players yet</p>'; return; }
+  if (players.length === 0) { list.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:0.5rem;margin-bottom:0">No players yet</p>'; return; }
   var self = this;
   list.innerHTML = players.map(function (p) {
-    return '<label class="player-option"><input type="radio" name="vote-target" value="' + p.peerId + '" /> ' + ViewerUI.escapeHtml(p.name) + '</label>';
+    return '<div class="player-card" data-player="' + p.peerId + '" style="cursor:pointer;margin-bottom:0.5rem">' +
+      '<div class="player-card-name" style="margin-bottom:0">' + ViewerUI.escapeHtml(p.name) + '</div>' +
+      '<div class="player-card-status">Select</div></div>';
   }).join('');
-  list.querySelectorAll('input[name="vote-target"]').forEach(function (input) {
-    input.addEventListener('change', function (e) {
-      self.selectedPlayer = e.target.value;
+  list.querySelectorAll('.player-card').forEach(function (card) {
+    card.addEventListener('click', function () {
+      list.querySelectorAll('.player-card').forEach(function (x) { x.classList.remove('selected'); });
+      card.classList.add('selected');
+      self.selectedPlayer = card.dataset.player;
       document.getElementById('viewer-vote-btn').disabled = false;
     });
   });
@@ -215,21 +230,23 @@ ViewerUI.prototype.updatePlayers = function (players) {
 ViewerUI.prototype.updateResults = function (results) {
   var resultsDiv = document.getElementById('viewer-results');
   if (resultsDiv === null) return;
-  resultsDiv.innerHTML = '<h2>Vote Results</h2>' + results.map(function (r) {
-    return '<div class="result-item">' + ViewerUI.escapeHtml(r.name) + ': ' + r.voteCount + '</div>';
+  resultsDiv.innerHTML = '<div class="section-label" style="margin-top:0.75rem">📊 投票結果</div>' + results.map(function (r) {
+    return '<div class="status status-info" style="margin-bottom:0.35rem;justify-content:space-between">' +
+      '<span>' + ViewerUI.escapeHtml(r.name) + '</span>' +
+      '<span style="font-weight:800;color:var(--accent-blue)">' + r.voteCount + ' 票</span></div>';
   }).join('');
 };
 ViewerUI.prototype.showConnected = function () {
   var status = document.getElementById('viewer-status');
-  if (status !== null) { status.textContent = 'Connected!'; status.className = 'status connected'; }
+  if (status !== null) { status.textContent = '✅ 接続完了'; status.className = 'status status-success'; }
 };
 ViewerUI.prototype.showError = function (message) {
   var status = document.getElementById('viewer-status');
-  if (status !== null) { status.textContent = message; status.className = 'status error'; }
+  if (status !== null) { status.textContent = message; status.className = 'status status-error'; }
 };
 ViewerUI.prototype.showDisconnected = function () {
   var status = document.getElementById('viewer-status');
-  if (status !== null) { status.textContent = 'Disconnected from host'; status.className = 'status error'; }
+  if (status !== null) { status.textContent = '⚠️ ホストとの接続が切断されました'; status.className = 'status status-error'; }
   var btn = document.getElementById('viewer-vote-btn');
   if (btn !== null) btn.disabled = true;
 };
@@ -245,7 +262,7 @@ var params = new URLSearchParams(window.location.search);
 var roomCode = params.get('room') || '';
 
 if (roomCode.length === 0) {
-  document.getElementById('app').innerHTML = '<h1>Error</h1><p>No room code specified. Open from the QR code or add <code>?room=CODE</code> to the URL.</p>';
+  document.getElementById('app').innerHTML = '<div style="text-align:center;padding:3rem 1rem"><h1 style="margin-bottom:1rem">⚠️ Error</h1><p style="color:var(--text-secondary)">No room code specified. Open from the QR code or add <code style="color:var(--accent-cyan)">?room=CODE</code> to the URL.</p></div>';
 } else {
   var container = document.getElementById('app');
   var viewerPeer = null;

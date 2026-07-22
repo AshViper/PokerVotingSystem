@@ -64,7 +64,7 @@ TournamentManager.prototype.addParticipant = function (peerId, name) {
     points: 50,
     champPredict: null,
     joinedAt: Date.now(),
-    rankRelevant: true    // ランキング対象（優勝予想締切後はfalse）
+    rankRelevant: this.status === 'idle' || this.status === 'predicting'
   };
   return true;
 };
@@ -675,17 +675,17 @@ HostUI.prototype.updateMatchArea = function (tournament, host) {
 HostUI.prototype.updateRanking = function (tournament) {
   var r = tournament.getRankings();
   this.rankingEl.innerHTML = r.length === 0
-    ? '<li style="color:var(--text-muted);text-align:center;padding:0.5rem">No rankings yet</li>'
+    ? '<li style="color:var(--text-muted);text-align:center;padding:0.5rem">ランキングはまだありません</li>'
     : r.map(function (p, i) {
         var cls = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : 'normal';
-        return '<li class="rank-item"><span class="rank-num ' + cls + '">' + (i + 1) + '</span><span class="rank-name">' + HostUI.escapeHtml(p.name) + '</span><span class="rank-pts">' + p.points + 'P</span><span class="rank-pred">🎯 ' + HostUI.escapeHtml(p.champPredictName) + '</span></li>';
+        return '<li class="rank-item"><span class="rank-num ' + cls + '">' + (i + 1) + '</span><span class="rank-name">' + HostUI.escapeHtml(p.name) + '</span><span class="rank-pts">' + p.points + 'P</span><span class="rank-pred">🎯 予想: ' + HostUI.escapeHtml(p.champPredictName) + '</span></li>';
       }).join('');
 };
 
 // Setupセレクトボックス更新
 HostUI.prototype.updateSetupSelects = function (tournament) {
   var ps = tournament.matchPlayers;
-  var opts = '<option value="">Select...</option>';
+  var opts = '<option value="">選択してください...</option>';
   for (var i = 0; i < ps.length; i++) opts += '<option value="' + ps[i].id + '">' + HostUI.escapeHtml(ps[i].name) + '</option>';
   if (this.setupP1) this.setupP1.innerHTML = opts;
   if (this.setupP2) this.setupP2.innerHTML = opts;
@@ -697,7 +697,7 @@ function startHost() {
   var ui = new HostUI(container);
 
   function attempt(retriesLeft) {
-    if (retriesLeft <= 0) { ui.showError('Failed to create room after multiple attempts'); return; }
+    if (retriesLeft <= 0) { ui.showError('複数回試行しましたが、ルームを作成できませんでした。'); return; }
     var roomCode = generateRoomCode();
     ui.displayRoomCode(roomCode);
 
@@ -760,7 +760,7 @@ function startHost() {
       });
     }).catch(function () {
       host.destroy();
-      ui.showError('Room code conflict, retrying... (' + (10 - retriesLeft + 1) + '/10)');
+      ui.showError('ルームコードが競合しました。再試行中... (' + (10 - retriesLeft + 1) + '/10)');
       attempt(retriesLeft - 1);
     });
   }

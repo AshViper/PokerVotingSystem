@@ -109,7 +109,7 @@ PlayerUI.prototype.renderJoin = function () {
     var code = document.getElementById('join-code').value.trim().toUpperCase();
     var name = document.getElementById('join-name').value.trim();
     if (code && name) self.onJoin(code, name);
-    else self.showError('Please fill in all fields');
+    else self.showError('すべての項目を入力してください');
   });
 
   // URL auto-fill
@@ -123,8 +123,8 @@ PlayerUI.prototype.showConnected = function () {
   this.container.innerHTML = [
     '<div class="connected-panel">',
     '  <div class="check">✅</div>',
-    '  <h2>Connected!</h2>',
-    '  <p>You have joined the game. Use the voting screen to place your bets.</p>',
+    '  <h2>参加完了！</h2>',
+    '  <p>ゲームへの参加が完了しました。<br/>QRコードからアクセスした「勝者予想画面」で投票やベットを行ってください。</p>',
     '</div>'
   ].join('');
 };
@@ -133,7 +133,14 @@ PlayerUI.prototype.showError = function (msg) {
   if (el) { el.textContent = msg; el.className = 'status status-error'; }
 };
 PlayerUI.prototype.showDisconnected = function () {
-  this.container.innerHTML = '<div class="connected-panel"><div class="check" style="color:var(--accent-red)">⚠️</div><h2>Disconnected</h2><p>The connection to the host was lost.</p><button class="btn btn-primary" onclick="location.reload()">Reconnect</button></div>';
+  this.container.innerHTML = [
+    '<div class="connected-panel">',
+    '  <div class="check" style="color:var(--accent-red)">⚠️</div>',
+    '  <h2>接続が切断されました</h2>',
+    '  <p>ホストサーバーとの接続が失われました。</p>',
+    '  <button class="btn btn-primary" onclick="location.reload()">再接続する</button>',
+    '</div>'
+  ].join('');
 };
 
 // ===== Main =====
