@@ -1,8 +1,16 @@
 // ==========================================
-// データ構造 & 状態管理 (State)
+// PeerJS を使った P2P リアルタイム通信
 // ==========================================
-// ルームごとにChannelを動的生成できるようにlet化
-let broadcast = null;
+// Host が Peer サーバー役（PeerID = 参加コード）となり、
+// Player / Vote の各クライアントは Host に直接 connect する
+// 「スター型」構成にする（Host を中心にした P2P）。
+// Room の状態は Host が唯一の正（Single Source of Truth）として保持し、
+// 変化があるたびに接続中の全クライアントへ SYNC_STATE を配信する。
+// ※ Host のタブ/ブラウザが閉じるとセッションは終了する（Hostが常時オンラインである前提）。
+
+let peer = null;                    // 自分自身の Peer インスタンス
+let hostConnections = new Map();    // [Hostのみ] peerId -> DataConnection
+let hostConn = null;                // [Player/Voteのみ] Hostへの接続
 
 let viewerPoints = parseInt(localStorage.getItem('viewer_points')) || 50;
 let viewerId = localStorage.getItem('viewer_id') || 'viewer_' + Math.random().toString(36).substring(2, 9);
@@ -11,79 +19,27 @@ localStorage.setItem('viewer_id', viewerId);
 let room = {
     roomCode: '',
     players: [],
-    voteState: 'WAITING',
+    voteState: 'WAITING', // WAITING | VOTING | ENDED
     votes: [],
     selectedWinnerId: null
 };
 
 let selectedVotePlayerId = null;
-let hasVotedThisRound = false;
+let voteSubmittedLocally = false; // 送信直後～SYNC_STATE反映までの二重送信ロック
+let lastShownWinnerId = null;     // 同じ結果を二重表示しないためのガード
 
-// BroadcastChannel の初期化・接続関数
-function initBroadcastChannel(roomCode) {
-    if (broadcast) {
-        broadcast.close();
-    }
-
-    // ルームコードごとの独立したチャンネル名を作成
-    const channelName = `realtime_game_${roomCode}`;
-    broadcast = new BroadcastChannel(channelName);
-
-    broadcast.onmessage = (event) => {
-        const { type, payload } = event.data;
-
-        switch (type) {
-            case 'SYNC_STATE':
-                room = payload;
-                updateHostUI();
-                updateVoteUI();
-                break;
-
-            case 'REQUEST_SYNC':
-                // 新規参加者(Vote等)が接続してきた際にHostが現在の状態を再送信
-                if (room.roomCode) {
-                    syncState();
-                }
-                break;
-
-            case 'PLAYER_JOINED':
-                if (!room.players.find(p => p.id === payload.id)) {
-                    room.players.push(payload);
-                    syncState();
-                }
-                break;
-
-            case 'SUBMIT_VOTE':
-                if (!room.votes.find(v => v.viewerId === payload.viewerId)) {
-                    room.votes.push(payload);
-                    syncState();
-                }
-                break;
-
-            case 'CALCULATE_RESULTS':
-                room.selectedWinnerId = payload.winnerId;
-                room.voteState = 'ENDED';
-                processVoteResult(payload.winnerId);
-                syncState();
-                break;
-
-            case 'RESET_ROUND':
-                room.votes = [];
-                room.voteState = 'WAITING';
-                room.selectedWinnerId = null;
-                hasVotedThisRound = false;
-                syncState();
-                break;
-        }
-    };
+// PeerJSのPeerIDは記号制限があるため、参加コードから安全なIDを作る
+function makePeerId(code) {
+    return 'rtgame-' + code.toLowerCase();
 }
 
-function syncState() {
-    updateHostUI();
-    updateVoteUI();
-    if (broadcast) {
-        broadcast.postMessage({ type: 'SYNC_STATE', payload: room });
+function destroyPeer() {
+    if (peer) {
+        try { peer.destroy(); } catch (e) { /* noop */ }
     }
+    peer = null;
+    hostConn = null;
+    hostConnections.clear();
 }
 
 // ==========================================
@@ -107,40 +63,117 @@ function goToPlayer() {
     showScreen('screen-player');
 }
 
-// 起動時のURLクエリパラメータ判定
+// 起動時のURLクエリパラメータ判定（QRコードアクセス）
 window.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
     const role = params.get('role');
     const code = params.get('room');
 
-    // QRコードアクセス (role=vote & roomが存在) の場合
     if (role === 'vote' && code) {
-        room.roomCode = code.toUpperCase();
-        initBroadcastChannel(room.roomCode);
-
-        document.getElementById('vote-room-code-display').innerText = room.roomCode;
+        const roomCode = code.toUpperCase();
+        room.roomCode = roomCode;
+        document.getElementById('vote-room-code-display').innerText = roomCode;
         showScreen('screen-vote');
         updateViewerPoints(0);
+        setVoteConnectStatus('Hostに接続中...');
 
-        // Hostに最新のRoom状態を要求
-        setTimeout(() => {
-            if (broadcast) broadcast.postMessage({ type: 'REQUEST_SYNC' });
-        }, 300);
+        connectToHost(roomCode, {
+            onOpen: () => {
+                setVoteConnectStatus('');
+                hostConn.send({ type: 'REQUEST_SYNC' });
+            },
+            onFail: () => {
+                setVoteConnectStatus('⚠ 接続に失敗しました。参加コードを確認し、再読み込みしてください。');
+            }
+        });
     } else {
         showScreen('screen-title');
     }
 });
 
 // ==========================================
-// 【Host画面】処理ロジック
+// 【Host】PeerJS セットアップ
 // ==========================================
 function initHost() {
-    if (!room.roomCode) {
-        room.roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        document.getElementById('host-room-code').innerText = room.roomCode;
-        initBroadcastChannel(room.roomCode);
-        generateQRCode(room.roomCode);
+    if (peer) return; // 既に初期化済み
+
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+    room.roomCode = code;
+    document.getElementById('host-room-code').innerText = code;
+    setHostPeerStatus('Peerサーバーに接続中...');
+
+    peer = new Peer(makePeerId(code));
+
+    peer.on('open', () => {
+        setHostPeerStatus('準備完了 ✅ プレイヤー・観戦者を招待できます');
+        generateQRCode(code);
+    });
+
+    peer.on('connection', (conn) => {
+        conn.on('open', () => {
+            hostConnections.set(conn.peer, conn);
+            // 接続直後に最新状態を送っておく
+            conn.send({ type: 'SYNC_STATE', payload: room });
+        });
+        conn.on('data', (data) => handleHostData(conn, data));
+        conn.on('close', () => {
+            hostConnections.delete(conn.peer);
+        });
+    });
+
+    peer.on('disconnected', () => {
+        setHostPeerStatus('再接続中...');
+        peer.reconnect();
+    });
+
+    peer.on('error', (err) => {
+        console.error('[Host Peer Error]', err);
+        if (err.type === 'unavailable-id') {
+            // 稀にIDが衝突した場合は作り直す
+            destroyPeer();
+            initHost();
+        } else {
+            setHostPeerStatus('⚠ 接続エラーが発生しました (' + err.type + ')');
+        }
+    });
+
+    updateHostUI();
+}
+
+function setHostPeerStatus(text) {
+    const el = document.getElementById('host-peer-status');
+    if (el) el.innerText = text;
+}
+
+function handleHostData(conn, data) {
+    const { type, payload } = data;
+    switch (type) {
+        case 'JOIN_PLAYER':
+            if (!room.players.find(p => p.id === payload.id)) {
+                room.players.push(payload);
+            }
+            broadcastState();
+            break;
+
+        case 'REQUEST_SYNC':
+            conn.send({ type: 'SYNC_STATE', payload: room });
+            break;
+
+        case 'SUBMIT_VOTE':
+            if (room.voteState === 'VOTING' && !room.votes.find(v => v.viewerId === payload.viewerId)) {
+                room.votes.push(payload);
+                broadcastState();
+            }
+            break;
     }
+}
+
+// Hostの状態を全クライアントへ配信 + 自画面も更新
+function broadcastState() {
+    updateHostUI();
+    hostConnections.forEach(conn => {
+        if (conn.open) conn.send({ type: 'SYNC_STATE', payload: room });
+    });
 }
 
 function generateQRCode(code) {
@@ -155,30 +188,22 @@ function generateQRCode(code) {
     });
 }
 
+// ==========================================
+// 【Host】投票コントロール
+// ==========================================
 function startVoting() {
     if (room.voteState === 'ENDED') {
-        broadcast.postMessage({ type: 'RESET_ROUND' });
+        // 新ラウンド：投票データのみリセット（観戦者ポイントは各自のLocalStorageのまま維持）
         room.votes = [];
-        hasVotedThisRound = false;
+        room.selectedWinnerId = null;
     }
-
     room.voteState = 'VOTING';
-    document.getElementById('host-state-badge').className = 'badge badge-voting';
-    document.getElementById('host-state-badge').innerText = '状態: 投票中';
-    document.getElementById('btn-start-vote').disabled = true;
-    document.getElementById('btn-end-vote').disabled = false;
-
-    syncState();
+    broadcastState();
 }
 
 function endVoting() {
     room.voteState = 'ENDED';
-    document.getElementById('host-state-badge').className = 'badge badge-ended';
-    document.getElementById('host-state-badge').innerText = '状態: 投票終了';
-    document.getElementById('btn-start-vote').disabled = false;
-    document.getElementById('btn-end-vote').disabled = true;
-
-    syncState();
+    broadcastState();
 }
 
 function selectWinner(playerId) {
@@ -188,12 +213,8 @@ function selectWinner(playerId) {
 
 function announceWinner() {
     if (!room.selectedWinnerId) return;
-    broadcast.postMessage({
-        type: 'CALCULATE_RESULTS',
-        payload: { winnerId: room.selectedWinnerId }
-    });
-    processVoteResult(room.selectedWinnerId);
-    endVoting();
+    room.voteState = 'ENDED';
+    broadcastState();
 }
 
 function updateHostUI() {
@@ -231,10 +252,58 @@ function updateHostUI() {
         }
     }
 
+    // ボタンの活性状態は room.voteState から一元的に導出する
+    const startBtn = document.getElementById('btn-start-vote');
+    const endBtn = document.getElementById('btn-end-vote');
+    if (startBtn) startBtn.disabled = room.voteState === 'VOTING';
+    if (endBtn) endBtn.disabled = room.voteState !== 'VOTING';
+
     const winnerSec = document.getElementById('winner-select-section');
     if (winnerSec) winnerSec.style.display = room.players.length > 0 ? 'block' : 'none';
     const calcBtn = document.getElementById('btn-calc-result');
-    if (calcBtn) calcBtn.disabled = !room.selectedWinnerId;
+    if (calcBtn) calcBtn.disabled = !room.selectedWinnerId || room.voteState !== 'ENDED';
+}
+
+// ==========================================
+// 【クライアント共通】Hostへの接続
+// ==========================================
+function connectToHost(code, { onOpen, onFail } = {}) {
+    destroyPeer();
+    peer = new Peer();
+
+    peer.on('open', () => {
+        hostConn = peer.connect(makePeerId(code), { reliable: true });
+
+        hostConn.on('open', () => {
+            if (onOpen) onOpen();
+        });
+
+        hostConn.on('data', (data) => {
+            handleClientData(data);
+        });
+
+        hostConn.on('close', () => {
+            alert('Hostとの接続が切れました。ページを再読み込みしてください。');
+        });
+    });
+
+    peer.on('error', (err) => {
+        console.error('[Client Peer Error]', err);
+        if (err.type === 'peer-unavailable') {
+            if (onFail) onFail();
+            else alert('参加コードが見つかりません。');
+        } else if (onFail) {
+            onFail();
+        }
+    });
+}
+
+function handleClientData(data) {
+    const { type, payload } = data;
+    if (type === 'SYNC_STATE') {
+        room = payload;
+        updateVoteUI();
+    }
 }
 
 // ==========================================
@@ -249,25 +318,38 @@ function joinGame() {
         return;
     }
 
-    room.roomCode = codeInput;
-    initBroadcastChannel(room.roomCode);
+    const joinBtn = document.querySelector('#player-join-form .btn-primary');
+    if (joinBtn) { joinBtn.disabled = true; joinBtn.innerText = '接続中...'; }
 
     const player = {
         id: 'player_' + Math.random().toString(36).substring(2, 9),
         name: nameInput
     };
 
-    document.getElementById('player-join-form').style.display = 'none';
-    document.getElementById('player-joined-info').style.display = 'block';
-    document.getElementById('player-display-name').innerText = nameInput;
+    connectToHost(codeInput, {
+        onOpen: () => {
+            room.roomCode = codeInput;
+            hostConn.send({ type: 'JOIN_PLAYER', payload: player });
 
-    broadcast.postMessage({ type: 'PLAYER_JOINED', payload: player });
-    broadcast.postMessage({ type: 'REQUEST_SYNC' });
+            document.getElementById('player-join-form').style.display = 'none';
+            document.getElementById('player-joined-info').style.display = 'block';
+            document.getElementById('player-display-name').innerText = nameInput;
+        },
+        onFail: () => {
+            alert('参加コードが見つかりません。コードを確認してください。');
+            if (joinBtn) { joinBtn.disabled = false; joinBtn.innerText = 'ゲームに参加する'; }
+        }
+    });
 }
 
 // ==========================================
 // 【Vote画面】処理ロジック
 // ==========================================
+function setVoteConnectStatus(text) {
+    const el = document.getElementById('vote-connect-status');
+    if (el) el.innerText = text;
+}
+
 function updateViewerPoints(delta) {
     viewerPoints += delta;
     localStorage.setItem('viewer_points', viewerPoints);
@@ -275,8 +357,12 @@ function updateViewerPoints(delta) {
     if (ptElem) ptElem.innerText = viewerPoints;
 }
 
+function hasVotedThisRound() {
+    return room.votes.some(v => v.viewerId === viewerId) || voteSubmittedLocally;
+}
+
 function selectVotePlayer(playerId) {
-    if (room.voteState !== 'VOTING' || hasVotedThisRound) return;
+    if (room.voteState !== 'VOTING' || hasVotedThisRound()) return;
     selectedVotePlayerId = playerId;
     updateVoteUI();
 }
@@ -289,7 +375,7 @@ function submitVote() {
         return;
     }
 
-    if (hasVotedThisRound) {
+    if (hasVotedThisRound()) {
         alert('同ラウンドでは再投票できません。');
         return;
     }
@@ -309,8 +395,13 @@ function submitVote() {
         return;
     }
 
+    if (!hostConn || !hostConn.open) {
+        alert('Hostとの接続がありません。ページを再読み込みしてください。');
+        return;
+    }
+
     updateViewerPoints(-betInput);
-    hasVotedThisRound = true;
+    voteSubmittedLocally = true;
 
     const voteData = {
         viewerId: viewerId,
@@ -318,19 +409,14 @@ function submitVote() {
         betPoint: betInput
     };
 
-    broadcast.postMessage({ type: 'SUBMIT_VOTE', payload: voteData });
+    hostConn.send({ type: 'SUBMIT_VOTE', payload: voteData });
     updateVoteUI();
 }
 
 function processVoteResult(winnerId) {
     const myVote = room.votes.find(v => v.viewerId === viewerId);
     const banner = document.getElementById('vote-result-banner');
-    if (!banner) return;
-
-    if (!myVote) {
-        banner.innerHTML = '';
-        return;
-    }
+    if (!banner || !myVote) return;
 
     if (myVote.playerId === winnerId) {
         const reward = myVote.betPoint * 2;
@@ -344,6 +430,17 @@ function processVoteResult(winnerId) {
 function updateVoteUI() {
     const badge = document.getElementById('vote-state-badge');
     const submitBtn = document.getElementById('btn-submit-vote');
+    const banner = document.getElementById('vote-result-banner');
+
+    // 新ラウンド判定：Hostが投票データをリセットしたらローカルの送信フラグ・結果表示もクリア
+    if (room.votes.length === 0 && room.voteState !== 'ENDED') {
+        voteSubmittedLocally = false;
+        lastShownWinnerId = null;
+        selectedVotePlayerId = null;
+        if (banner) banner.innerHTML = '';
+    }
+
+    const voted = hasVotedThisRound();
 
     if (badge) {
         if (room.voteState === 'WAITING') {
@@ -353,7 +450,7 @@ function updateVoteUI() {
         } else if (room.voteState === 'VOTING') {
             badge.className = 'badge badge-voting';
             badge.innerText = '投票受付中';
-            if (submitBtn) submitBtn.disabled = hasVotedThisRound || !selectedVotePlayerId;
+            if (submitBtn) submitBtn.disabled = voted || !selectedVotePlayerId;
         } else {
             badge.className = 'badge badge-ended';
             badge.innerText = '投票受付終了';
@@ -362,7 +459,7 @@ function updateVoteUI() {
     }
 
     if (submitBtn) {
-        submitBtn.innerText = hasVotedThisRound ? '投票済み' : '投票する';
+        submitBtn.innerText = voted ? '投票済み' : '投票する';
     }
 
     const voteList = document.getElementById('vote-player-list');
@@ -380,6 +477,12 @@ function updateVoteUI() {
         `;
             }).join('');
         }
+    }
+
+    // 勝者発表の結果表示（同じ結果を二重表示しない）
+    if (room.voteState === 'ENDED' && room.selectedWinnerId && lastShownWinnerId !== room.selectedWinnerId) {
+        lastShownWinnerId = room.selectedWinnerId;
+        processVoteResult(room.selectedWinnerId);
     }
 }
 

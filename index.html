@@ -11,6 +11,9 @@
 
   <!-- QRコード生成ライブラリ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <!-- PeerJS（P2P通信ライブラリ） -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
 </head>
 
 <body>
@@ -42,6 +45,8 @@
           <label>参加コード</label>
           <div id="host-room-code" class="room-code-display">------</div>
         </div>
+
+        <p id="host-peer-status" class="subtitle" style="margin-bottom: 1rem;">Peer初期化中...</p>
 
         <div id="qrcode-container">
           <div id="qrcode"></div>
@@ -98,6 +103,7 @@
       <div class="card">
         <h1>🎲 Vote（観戦・投票）</h1>
         <p class="subtitle">ルーム: <strong id="vote-room-code-display">------</strong></p>
+        <p id="vote-connect-status" class="subtitle">接続中...</p>
 
         <div class="point-display"><span id="viewer-points">50</span> <span style="font-size: 1rem;">pt</span></div>
 
