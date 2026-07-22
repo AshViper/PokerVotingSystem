@@ -138,49 +138,37 @@ function PlayerUI(container, onJoin) {
   this.onJoin = onJoin;
   this.roomCode = '';
   this.playerName = '';
-  this.peer = null;
-  // 各種UI要素
-  this.joinScreen = null;
-  this.mainScreen = null;
-  this.champScreen = null;
-  this.betScreen = null;
-  this.rankingScreen = null;
-  this.currentView = null;
   this.renderLayout();
 }
 PlayerUI.prototype.renderLayout = function () {
+  var self = this;
   this.container.innerHTML = [
     '<div class="player-view">',
-    '  <!-- Join Screen -->',
     '  <div id="join-screen">',
     '    <h1>Join Tournament</h1>',
     '    <div class="join-form">',
     '      <input type="text" id="player-room-code" placeholder="Room Code" maxlength="6" autocomplete="off" />',
     '      <input type="text" id="player-name" placeholder="Your Nickname" autocomplete="off" />',
-    '      <button id="player-join-btn">Join</button>',
+    '      <button id="player-join-btn" class="btn-primary">Join</button>',
     '    </div>',
     '    <div id="player-status" class="status"></div>',
     '  </div>',
-    '  <!-- Main Screen (after join) -->',
     '  <div id="main-screen" style="display:none">',
-    '    <h1>P2P Tournament</h1>',
-    '    <div id="nav-tabs" style="display:flex;gap:4px;margin-bottom:8px">',
-    '      <button class="nav-tab" data-view="champ" style="flex:1">Prediction</button>',
-    '      <button class="nav-tab" data-view="bet" style="flex:1">Bet</button>',
-    '      <button class="nav-tab" data-view="ranking" style="flex:1">Ranking</button>',
+    '    <div class="player-header">',
+    '      <div class="header-left">',
+    '        <div class="room-badge" id="player-room-badge">Room: ---</div>',
+    '        <div class="player-greeting" id="player-greeting">Welcome!</div>',
+    '      </div>',
+    '      <div class="points-badge" id="points-badge">50 pts</div>',
     '    </div>',
-    '    <div id="view-champ" class="tab-content"></div>',
-    '    <div id="view-bet" class="tab-content" style="display:none"></div>',
-    '    <div id="view-ranking" class="tab-content" style="display:none"></div>',
-    '    <div id="tournament-status-bar" class="status"></div>',
+    '    <div id="champ-section" class="section"></div>',
+    '    <div id="bet-section" class="section"></div>',
+    '    <div id="ranking-section" class="section"></div>',
+    '    <div id="player-status-main" class="status"></div>',
     '  </div>',
     '</div>'
   ].join('');
 
-  this.joinScreen = document.getElementById('join-screen');
-  this.mainScreen = document.getElementById('main-screen');
-
-  var self = this;
   document.getElementById('player-join-btn').addEventListener('click', function () {
     var roomInput = document.getElementById('player-room-code');
     var nameInput = document.getElementById('player-name');
@@ -193,17 +181,7 @@ PlayerUI.prototype.renderLayout = function () {
     }
   });
 
-  // タブ切り替え
-  var tabs = this.container.querySelectorAll('.nav-tab');
-  for (var i = 0; i < tabs.length; i++) {
-    (function (tab) {
-      tab.addEventListener('click', function () {
-        self.switchTab(tab.getAttribute('data-view'));
-      });
-    })(tabs[i]);
-  }
-
-  // URLにroomとnameがある場合
+  // URL params
   var params = new URLSearchParams(window.location.search);
   var roomFromUrl = params.get('room') || '';
   var nameFromUrl = params.get('name') || '';
@@ -215,190 +193,145 @@ PlayerUI.prototype.renderLayout = function () {
     self.onJoin(roomFromUrl, nameFromUrl);
   }
 };
-PlayerUI.prototype.switchTab = function (view) {
-  var views = ['champ', 'bet', 'ranking'];
-  for (var i = 0; i < views.length; i++) {
-    var el = document.getElementById('view-' + views[i]);
-    if (el) el.style.display = views[i] === view ? '' : 'none';
-  }
-  var tabs = this.container.querySelectorAll('.nav-tab');
-  for (var i = 0; i < tabs.length; i++) {
-    tabs[i].style.opacity = tabs[i].getAttribute('data-view') === view ? '1' : '0.5';
-  }
-  this.currentView = view;
-};
 
-// 接続成功 → メイン画面へ
 PlayerUI.prototype.showConnected = function () {
-  this.joinScreen.style.display = 'none';
-  this.mainScreen.style.display = '';
+  document.getElementById('join-screen').style.display = 'none';
+  document.getElementById('main-screen').style.display = '';
+  document.getElementById('player-room-badge').textContent = 'Room: ' + this.roomCode;
+  document.getElementById('player-greeting').textContent = 'Welcome, ' + PlayerUI.escapeHtml(this.playerName) + '!';
 };
 
-// 大会状態の更新
 PlayerUI.prototype.updateTournamentState = function (state, peer, rankings) {
-  this.updateChampView(state, peer);
-  this.updateBetView(state, peer);
-  this.updateRankingView(rankings || []);
-  this.updateStatusBar(state);
+  this.updateChampSection(state, peer);
+  this.updateBetSection(state, peer);
+  this.updateRankingSection(rankings || []);
 };
-PlayerUI.prototype.updateChampView = function (state, peer) {
-  var el = document.getElementById('view-champ');
-  if (!el) return;
-  if (state.status === 'idle') {
-    el.innerHTML = '<p>Waiting for tournament to start...</p>';
-    return;
-  }
-  // 対戦プレイヤー一覧を表示
-  var players = state.matchPlayers || [];
-  // 自分の予想状態を確認
-  var myChamp = null;
-  if (peer && peer.peerId && peer.tournamentState) {
-    // 仮: peerIdがuserIDとして使われている
-  }
 
+PlayerUI.prototype.updateChampSection = function (state, peer) {
+  var el = document.getElementById('champ-section');
+  if (!el) return;
   if (state.champPredictOpen) {
     if (peer && peer.champPredicted) {
-      el.innerHTML = '<p>Championship prediction submitted! Waiting for predictions to close.</p>';
+      el.innerHTML = '<div class="info-msg">Championship prediction submitted ✓</div>';
     } else {
-      var html = '<h2>Championship Prediction</h2>';
-      html += '<p>Who will win the tournament? (One-time, cannot change)</p>';
-      html += '<div class="player-list" id="champ-player-list">';
-      if (players.length === 0) {
-        html += '<p>No players registered yet. Wait for the master to add players.</p>';
-      } else {
-        for (var i = 0; i < players.length; i++) {
-          html += '<label class="player-option">';
-          html += '  <input type="radio" name="champ-predict" value="' + players[i].id + '" />';
-          html += '  ' + PlayerUI.escapeHtml(players[i].name);
-          html += '</label>';
-        }
-        html += '</div>';
-        html += '<button id="btn-submit-champ-predict" disabled>Submit Prediction</button>';
+      var players = state.matchPlayers || [];
+      var html = '<div class="section-title">Championship Prediction</div>';
+      html += '<p class="hint">Who will win the tournament? (one-time only)</p>';
+      html += '<div class="player-select-grid">';
+      for (var i = 0; i < players.length; i++) {
+        html += '<label class="player-card" id="champ-card-' + i + '">';
+        html += '  <input type="radio" name="champ-pick" value="' + players[i].id + '" />';
+        html += '  <span class="card-name">' + PlayerUI.escapeHtml(players[i].name) + '</span>';
+        html += '</label>';
       }
+      html += '</div>';
+      html += '<button id="btn-champ-submit" class="btn-primary" disabled>Submit Prediction</button>';
       el.innerHTML = html;
-
-      // ラジオボタンイベント
-      var radios = el.querySelectorAll('input[name="champ-predict"]');
-      for (var i2 = 0; i2 < radios.length; i2++) {
-        (function (radio) {
-          radio.addEventListener('change', function () {
-            var btn = document.getElementById('btn-submit-champ-predict');
-            if (btn) btn.disabled = false;
-          });
-        })(radios[i2]);
+      var radios = el.querySelectorAll('input[name="champ-pick"]');
+      for (var j = 0; j < radios.length; j++) {
+        (function (r) {
+          r.addEventListener('change', function () { document.getElementById('btn-champ-submit').disabled = false; });
+        })(radios[j]);
       }
-      var submitBtn = document.getElementById('btn-submit-champ-predict');
-      if (submitBtn) {
-        submitBtn.addEventListener('click', function () {
-          var selected = el.querySelector('input[name="champ-predict"]:checked');
-          if (selected && peer) {
-            peer.sendChampPredict(selected.value);
-          }
+      var btn = document.getElementById('btn-champ-submit');
+      if (btn) {
+        btn.addEventListener('click', function () {
+          var sel = el.querySelector('input[name="champ-pick"]:checked');
+          if (sel && peer) peer.sendChampPredict(sel.value);
         });
       }
     }
-  } else if (state.status === 'predicting') {
-    el.innerHTML = '<p>Championship predictions are closed. Awaiting tournament start...</p>';
-  } else if (state.status === 'inProgress' || state.status === 'finished') {
-    el.innerHTML = '<p>Championship prediction phase completed.</p>';
-    if (state.tournamentWinnerId) {
-      var winnerName = '';
-      for (var j = 0; j < players.length; j++) {
-        if (players[j].id === state.tournamentWinnerId) { winnerName = players[j].name; break; }
-      }
-      el.innerHTML += '<p>Tournament Winner: <strong>' + PlayerUI.escapeHtml(winnerName) + '</strong></p>';
-    }
+  } else if (state.status === 'idle') {
+    el.innerHTML = '<div class="info-msg">Waiting for tournament to start...</div>';
+  } else {
+    el.innerHTML = '';
   }
 };
-PlayerUI.prototype.updateBetView = function (state, peer) {
-  var el = document.getElementById('view-bet');
-  if (!el) return;
 
+PlayerUI.prototype.updateBetSection = function (state, peer) {
+  var el = document.getElementById('bet-section');
+  if (!el) return;
   if (state.status !== 'inProgress') {
-    el.innerHTML = state.status === 'finished' ? '<p>Tournament finished!</p>' : '<p>Waiting for tournament to be in progress...</p>';
+    el.innerHTML = state.status === 'finished'
+      ? '<div class="info-msg">Tournament finished! Check rankings.</div>'
+      : '';
     return;
   }
-
   var matches = state.matches || [];
   var activeMatch = null;
   for (var i = 0; i < matches.length; i++) {
-    if (matches[i].votingOpen || matches[i].winner === null) {
-      activeMatch = matches[i];
-      break;
-    }
+    if (matches[i].winner === null) { activeMatch = matches[i]; break; }
   }
-
   if (!activeMatch) {
-    el.innerHTML = '<p>No active match. Waiting for match to start...</p>';
+    el.innerHTML = '<div class="info-msg">All matches completed. Waiting for final results...</div>';
     return;
   }
-
   var p1Name = PlayerUI.getPlayerName(state.matchPlayers, activeMatch.player1Id);
   var p2Name = PlayerUI.getPlayerName(state.matchPlayers, activeMatch.player2Id);
-
-  if (activeMatch.votingOpen) {
-    if (peer && peer.hasBetForMatch && peer.hasBetForMatch[activeMatch.id]) {
-      el.innerHTML = '<p>Bet submitted for this match. Waiting for result...</p>';
-      el.innerHTML += '<p>' + PlayerUI.escapeHtml(p1Name) + ' vs ' + PlayerUI.escapeHtml(p2Name) + '</p>';
-    } else {
-      var html = '<h2>Match: ' + PlayerUI.escapeHtml(p1Name) + ' vs ' + PlayerUI.escapeHtml(p2Name) + '</h2>';
-      html += '<p>Voting is OPEN! Place your bet.</p>';
-      html += '<div><label>Win prediction:</label>';
-      html += '<select id="bet-target">';
-      html += '  <option value="' + activeMatch.player1Id + '">' + PlayerUI.escapeHtml(p1Name) + '</option>';
-      html += '  <option value="' + activeMatch.player2Id + '">' + PlayerUI.escapeHtml(p2Name) + '</option>';
-      html += '</select></div>';
-      html += '<div><label>Bet points:</label>';
-      html += '<input type="number" id="bet-points" value="100" min="1" /></div>';
-      html += '<button id="btn-place-bet">Place Bet</button>';
-      el.innerHTML = html;
-
-      document.getElementById('btn-place-bet').addEventListener('click', function () {
-        var target = document.getElementById('bet-target').value;
-        var points = parseInt(document.getElementById('bet-points').value, 10);
-        if (points > 0 && peer) {
-          peer.sendBet(activeMatch.id, target, points);
-        }
-      });
-    }
-  } else {
-    el.innerHTML = '<p>Match: ' + PlayerUI.escapeHtml(p1Name) + ' vs ' + PlayerUI.escapeHtml(p2Name) + '</p>';
-    el.innerHTML += '<p>Voting is CLOSED. Waiting for result...</p>';
-    if (activeMatch.winner) {
-      el.innerHTML += '<p>Winner: <strong>' + PlayerUI.escapeHtml(PlayerUI.getPlayerName(state.matchPlayers, activeMatch.winner)) + '</strong></p>';
-    }
-  }
-};
-PlayerUI.prototype.updateRankingView = function (rankings) {
-  var el = document.getElementById('view-ranking');
-  if (!el) return;
-  if (!rankings || rankings.length === 0) {
-    el.innerHTML = '<p>No rankings yet.</p>';
+  if (!activeMatch.votingOpen) {
+    el.innerHTML = '<div class="section-title">Current Match</div>' +
+      '<div class="match-vs"><span class="player-name">' + PlayerUI.escapeHtml(p1Name) + '</span>' +
+      '<span class="vs-text">VS</span>' +
+      '<span class="player-name">' + PlayerUI.escapeHtml(p2Name) + '</span></div>' +
+      (activeMatch.winner
+        ? '<div class="result-box">Winner: <strong>' + PlayerUI.escapeHtml(PlayerUI.getPlayerName(state.matchPlayers, activeMatch.winner)) + '</strong></div>'
+        : '<div class="info-msg">Voting closed — waiting for result...</div>');
     return;
   }
-  var html = '<h2>Rankings</h2><table style="width:100%"><tr><th>#</th><th>Name</th><th>Points</th><th>Prediction</th></tr>';
+  el.innerHTML = [
+    '<div class="section-title">Place Your Bet</div>',
+    '<div class="match-vs"><span class="player-name">' + PlayerUI.escapeHtml(p1Name) + '</span>',
+    '<span class="vs-text">VS</span>',
+    '<span class="player-name">' + PlayerUI.escapeHtml(p2Name) + '</span></div>',
+    '<div class="bet-row">',
+    '  <label>Win prediction:</label>',
+    '  <select id="bet-target" class="bet-select">',
+    '    <option value="' + activeMatch.player1Id + '">' + PlayerUI.escapeHtml(p1Name) + '</option>',
+    '    <option value="' + activeMatch.player2Id + '">' + PlayerUI.escapeHtml(p2Name) + '</option>',
+    '  </select>',
+    '</div>',
+    '<div class="bet-row">',
+    '  <label>Bet points:</label>',
+    '  <input type="number" id="bet-points" class="bet-input" value="5" min="1" />',
+    '</div>',
+    '<button id="btn-place-bet" class="btn-primary">Place Bet</button>'
+  ].join('');
+  document.getElementById('btn-place-bet').addEventListener('click', function () {
+    var target = document.getElementById('bet-target').value;
+    var pts = parseInt(document.getElementById('bet-points').value, 10);
+    if (pts > 0 && peer) peer.sendBet(activeMatch.id, target, pts);
+  });
+};
+
+PlayerUI.prototype.updateRankingSection = function (rankings) {
+  var el = document.getElementById('ranking-section');
+  if (!el) return;
+  if (!rankings || rankings.length === 0) { el.innerHTML = ''; return; }
+  var html = '<div class="section-title">Rankings</div>';
+  html += '<table class="rank-table">';
+  html += '<tr><th>#</th><th>Name</th><th>Points</th></tr>';
   for (var i = 0; i < rankings.length; i++) {
-    html += '<tr><td>' + (i + 1) + '</td><td>' + PlayerUI.escapeHtml(rankings[i].name) + '</td><td>' + rankings[i].points + '</td><td>' + PlayerUI.escapeHtml(rankings[i].champPredictName) + '</td></tr>';
+    html += '<tr class="rank-row' + (i < 3 ? ' top-' + (i + 1) : '') + '">' +
+      '<td class="rank-num">' + (i + 1) + '</td>' +
+      '<td>' + PlayerUI.escapeHtml(rankings[i].name) + '</td>' +
+      '<td class="pts">' + rankings[i].points + '</td></tr>';
   }
   html += '</table>';
   el.innerHTML = html;
 };
-PlayerUI.prototype.updateStatusBar = function (state) {
-  var el = document.getElementById('tournament-status-bar');
-  if (!el) return;
-  el.textContent = 'Status: ' + state.status;
-  el.className = 'status';
-  if (state.status === 'predicting') el.className += ' connected';
-  else if (state.status === 'inProgress') el.className += ' connected';
-  else if (state.status === 'finished') el.className += ' connected';
-};
+
 PlayerUI.prototype.showError = function (message) {
-  var status = document.getElementById('player-status');
-  if (status !== null) { status.textContent = message; status.className = 'status error'; }
+  var el = document.getElementById('player-status');
+  if (el) { el.textContent = message; el.className = 'status error'; }
+  var el2 = document.getElementById('player-status-main');
+  if (el2) { el2.textContent = message; el2.className = 'status error'; }
 };
 PlayerUI.prototype.showDisconnected = function () {
-  var status = document.getElementById('player-status');
-  if (status !== null) { status.textContent = 'Disconnected from host'; status.className = 'status error'; }
+  var msg = 'Disconnected from host';
+  var el = document.getElementById('player-status');
+  if (el) { el.textContent = msg; el.className = 'status error'; }
+  var el2 = document.getElementById('player-status-main');
+  if (el2) { el2.textContent = msg; el2.className = 'status error'; }
 };
 PlayerUI.escapeHtml = function (text) { var div = document.createElement('div'); div.textContent = text; return div.innerHTML; };
 PlayerUI.getPlayerName = function (players, id) {

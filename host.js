@@ -61,7 +61,7 @@ TournamentManager.prototype.addParticipant = function (peerId, name) {
   if (this.participants[peerId]) return false;
   this.participants[peerId] = {
     name: name,
-    points: 1000,
+    points: 50,
     champPredict: null,
     joinedAt: Date.now(),
     rankRelevant: true    // ランキング対象（優勝予想締切後はfalse）
@@ -191,7 +191,7 @@ TournamentManager.prototype.setTournamentWinner = function (playerId) {
     if (this.participants.hasOwnProperty(id)) {
       var p = this.participants[id];
       if (p.champPredict === playerId) {
-        p.points += 500; // ボーナス
+        p.points += 30; // ボーナス
       }
     }
   }
@@ -519,76 +519,48 @@ function HostUI(container) {
   this.render();
   this.roomCodeElement = document.getElementById('host-room-code');
   this.qrContainer = document.getElementById('host-qr-code');
-  this.playersListElement = document.getElementById('host-players');
-  this.playersCountElement = document.getElementById('host-players-count');
-  this.viewersCountElement = document.getElementById('host-viewers');
-  this.resultsElement = document.getElementById('host-results');
-  // Tournament UI elements
-  this.tournamentStatusEl = document.getElementById('tournament-status');
-  this.tournamentControls = document.getElementById('tournament-controls');
   this.participantListEl = document.getElementById('participant-list');
-  this.matchListEl = document.getElementById('match-list');
+  this.participantCountEl = document.getElementById('participant-count');
   this.rankingEl = document.getElementById('host-ranking');
-  this.currentMatchInfo = document.getElementById('current-match-info');
-  this.betSummaryEl = document.getElementById('bet-summary');
-  this.p1Select = document.getElementById('match-player1');
-  this.p2Select = document.getElementById('match-player2');
+  this.matchAreaEl = document.getElementById('match-area');
+  this.statusEl = document.getElementById('host-status');
 }
 HostUI.prototype.render = function () {
   this.container.innerHTML = [
     '<div class="host-view">',
-    '  <h1>P2P Tournament</h1>',
-    '  <div>',
-    '    <div class="room-code-section">',
-    '      <h2>Room Code</h2>',
+    '  <div class="header-row">',
+    '    <div class="room-block">',
+    '      <div class="room-label">Room Code</div>',
     '      <div id="host-room-code" class="room-code">---</div>',
     '    </div>',
     '    <div id="host-qr-code" class="qr-code"></div>',
     '  </div>',
-    '  <hr/>',
-    '  <h2>Tournament Control</h2>',
-    '  <div id="tournament-controls">',
-    '    <p>Loading...</p>',
+    '  <div class="section">',
+    '    <div class="section-title">Participants (<span id="participant-count">0</span>)</div>',
+    '    <div id="participant-list" class="participant-grid"></div>',
     '  </div>',
-    '  <hr/>',
-    '  <h2>Participants</h2>',
-    '  <ul id="participant-list"></ul>',
-    '  <hr/>',
-    '  <h2>Match Players</h2>',
-    '  <div>',
-    '    <input type="text" id="new-player-name" placeholder="Player name" style="display:inline;width:auto;flex:1" />',
-    '    <button id="add-player-btn" style="display:inline;width:auto">Add</button>',
+    '  <div class="section">',
+    '    <div class="section-title">Match Control</div>',
+    '    <div id="match-area" class="match-card">',
+    '      <div class="empty-state">No match. Add players and create matches below.</div>',
+    '    </div>',
     '  </div>',
-    '  <ul id="match-player-list"></ul>',
-    '  <hr/>',
-    '  <h2>Matches</h2>',
-    '  <div>',
-    '    <select id="match-player1"><option value="">Select...</option></select>',
-    '    <span> vs </span>',
-    '    <select id="match-player2"><option value="">Select...</option></select>',
-    '    <button id="add-match-btn">Add Match</button>',
+    '  <div class="section">',
+    '    <div class="section-title">Setup</div>',
+    '    <div class="setup-row">',
+    '      <input type="text" id="new-player-name" placeholder="Player name (ex: Alice)" />',
+    '      <button id="add-player-btn">Add Player</button>',
+    '    </div>',
+    '    <select id="match-player1"></select>',
+    '    <span style="color:#888;margin:0 4px">vs</span>',
+    '    <select id="match-player2"></select>',
+    '    <button id="add-match-btn">Create Match</button>',
     '  </div>',
-    '  <div id="match-list"></div>',
-    '  <hr/>',
-    '  <h2>Current Match</h2>',
-    '  <div id="current-match-info">No active match</div>',
-    '  <div id="bet-summary"></div>',
-    '  <hr/>',
-    '  <h2>Rankings</h2>',
-    '  <table id="host-ranking" style="width:100%">',
-    '    <tr><th>#</th><th>Name</th><th>Points</th></tr>',
-    '  </table>',
-    '  <hr/>',
-    '  <div class="players-section">',
-    '    <h2>Players (<span id="host-players-count">0</span>)</h2>',
-    '    <ul id="host-players"></ul>',
-    '  </div>',
-    '  <div class="viewers-section">',
-    '    <h2>Viewers: <span id="host-viewers">0</span></h2>',
-    '  </div>',
-    '  <div class="results-section">',
-    '    <h2>Vote Results</h2>',
-    '    <ul id="host-results"></ul>',
+    '  <div class="section">',
+    '    <div class="section-title">Rankings</div>',
+    '    <table id="host-ranking" class="rank-table">',
+    '      <tr><th>#</th><th>Name</th><th>Points</th><th>Prediction</th></tr>',
+    '    </table>',
     '  </div>',
     '  <div id="host-status" class="status"></div>',
     '</div>'
@@ -599,221 +571,157 @@ HostUI.prototype.displayRoomCode = function (code) {
   var viewerUrl = buildViewerUrl(code);
   if (typeof QRCode !== 'undefined') {
     this.qrContainer.innerHTML = '';
-    new QRCode(this.qrContainer, {
-      text: viewerUrl,
-      width: 200,
-      height: 200
-    });
+    new QRCode(this.qrContainer, { text: viewerUrl, width: 180, height: 180 });
   } else { this.qrContainer.innerHTML = '<p>QR not available</p>'; }
 };
-HostUI.prototype.updatePlayers = function (players) {
-  this.playersCountElement.textContent = String(players.length);
-  this.playersListElement.innerHTML = players.map(function (p) { return '<li>' + HostUI.escapeHtml(p.name) + '</li>'; }).join('');
-};
-HostUI.prototype.updateViewers = function (count) { this.viewersCountElement.textContent = String(count); };
-HostUI.prototype.updateResults = function (results) {
-  this.resultsElement.innerHTML = results.map(function (r) {
-    return '<li class="result-item">' + HostUI.escapeHtml(r.name) + ': ' + r.voteCount + ' votes</li>';
-  }).join('');
-};
 HostUI.prototype.showError = function (message) {
-  var status = document.getElementById('host-status');
-  if (status !== null) { status.textContent = message; status.className = 'status error'; }
+  if (this.statusEl) { this.statusEl.textContent = message; this.statusEl.className = 'status error'; }
 };
 HostUI.escapeHtml = function (text) { var div = document.createElement('div'); div.textContent = text; return div.innerHTML; };
 
-// 大会管理UIの更新
-HostUI.prototype.updateTournamentControls = function (tournament, host) {
-  var self = this;
-  var state = tournament.getState();
-  var controls = this.tournamentControls;
-
-  var html = '<p>Status: <strong>' + state.status + '</strong></p>';
-  html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin:8px 0">';
-
-  if (state.status === 'idle') {
-    html += '<button id="btn-open-champ-predict">Start Tournament (Open Predictions)</button>';
-  }
-  if (state.champPredictOpen) {
-    html += '<button id="btn-close-champ-predict">Close Championship Predictions</button>';
-  }
-  if (state.status === 'inProgress') {
-    html += '<button id="btn-finish-tournament">Finish Tournament</button>';
-  }
-  if (state.status === 'finished') {
-    html += '<p>Tournament finished!</p>';
-  }
-  html += '</div>';
-
-  // マッチ操作ボタン
-  if (state.status === 'inProgress' && state.matches.length > 0) {
-    html += '<h3>Match Control</h3>';
-    html += '<div style="display:flex;gap:4px;flex-wrap:wrap;margin:8px 0">';
-    for (var i = 0; i < state.matches.length; i++) {
-      var m = state.matches[i];
-      html += '<div style="border:1px solid #444;padding:8px;margin:4px;border-radius:4px;min-width:200px">';
-      html += '<strong>' + tournament.getPlayerName(m.player1Id) + ' vs ' + tournament.getPlayerName(m.player2Id) + '</strong><br/>';
-      html += '<small>Match: ' + m.id + '</small><br/>';
-      html += '<small>Voting: ' + (m.votingOpen ? 'OPEN' : 'CLOSED') + '</small><br/>';
-      if (m.winner) {
-        html += '<small>Winner: ' + tournament.getPlayerName(m.winner) + '</small><br/>';
-      }
-      if (!m.winner) {
-        html += '<button class="btn-open-vote" data-match="' + m.id + '">' + (m.votingOpen ? 'Close Voting' : 'Open Voting') + '</button>';
-        html += '<br/><select class="sel-winner" data-match="' + m.id + '">';
-        html += '<option value="">Select winner...</option>';
-        html += '<option value="' + m.player1Id + '">' + tournament.getPlayerName(m.player1Id) + '</option>';
-        html += '<option value="' + m.player2Id + '">' + tournament.getPlayerName(m.player2Id) + '</option>';
-        html += '</select>';
-        html += '<button class="btn-set-winner" data-match="' + m.id + '">Register Winner</button>';
-      }
-      html += '</div>';
-    }
-    html += '</div>';
-  }
-
-  controls.innerHTML = html;
-
-  // イベントバインド
-  if (document.getElementById('btn-open-champ-predict')) {
-    document.getElementById('btn-open-champ-predict').addEventListener('click', function () {
-      host.tournament.openChampionshipPredict();
-      host.broadcastTournamentState();
-      host.broadcastRanking();
-      self.updateTournamentControls(host.tournament, host);
-    });
-  }
-  if (document.getElementById('btn-close-champ-predict')) {
-    document.getElementById('btn-close-champ-predict').addEventListener('click', function () {
-      host.tournament.closeChampionshipPredict();
-      host.broadcastTournamentState();
-      host.broadcastRanking();
-      self.updateTournamentControls(host.tournament, host);
-    });
-  }
-  if (document.getElementById('btn-finish-tournament')) {
-    document.getElementById('btn-finish-tournament').addEventListener('click', function () {
-      var winnerId = prompt('Enter the tournament winner Player ID:');
-      if (winnerId) {
-        host.tournament.setTournamentWinner(winnerId);
-        host.broadcastTournamentState();
-        host.broadcastRanking();
-        self.updateTournamentControls(host.tournament, host);
-      }
-    });
-  }
-
-  // マッチ操作イベント
-  var openVoteBtns = controls.querySelectorAll('.btn-open-vote');
-  for (var i1 = 0; i1 < openVoteBtns.length; i1++) {
-    (function (btn) {
-      btn.addEventListener('click', function () {
-        var matchId = btn.getAttribute('data-match');
-        var match = host.tournament.getMatch(matchId);
-        if (match) {
-          if (match.votingOpen) { host.tournament.closeVoting(matchId); }
-          else { host.tournament.openVoting(matchId); }
-          host.broadcastTournamentState();
-          self.updateTournamentControls(host.tournament, host);
-          self.updateCurrentMatchInfo(host.tournament, matchId);
-        }
-      });
-    })(openVoteBtns[i1]);
-  }
-
-  var setWinnerBtns = controls.querySelectorAll('.btn-set-winner');
-  for (var i2 = 0; i2 < setWinnerBtns.length; i2++) {
-    (function (btn) {
-      btn.addEventListener('click', function () {
-        var matchId = btn.getAttribute('data-match');
-        var sel = controls.querySelector('.sel-winner[data-match="' + matchId + '"]');
-        if (sel && sel.value) {
-          host.tournament.setMatchWinner(matchId, sel.value);
-          host.broadcastTournamentState();
-          host.broadcastRanking();
-          self.updateTournamentControls(host.tournament, host);
-          self.updateCurrentMatchInfo(host.tournament, matchId);
-          self.updateRanking(host.tournament);
-        }
-      });
-    })(setWinnerBtns[i2]);
-  }
-};
-
-// 参加者一覧表示
+// 参加者一覧
 HostUI.prototype.updateParticipantList = function (tournament) {
   var list = tournament.getAllParticipants();
+  this.participantCountEl.textContent = list.length;
   this.participantListEl.innerHTML = list.map(function (p) {
-    var predName = tournament.getPlayerName(p.champPredict);
-    return '<li>' + HostUI.escapeHtml(p.name) + ' - ' + p.points + ' pts' +
-      (p.champPredict ? ' ★' + HostUI.escapeHtml(predName) : '') +
-      (p.rankRelevant ? '' : ' [観戦]') +
-      '</li>';
+    return '<div class="participant-chip' + (p.rankRelevant ? '' : ' spectator') + '">' +
+      HostUI.escapeHtml(p.name) +
+      ' <span class="pts">' + p.points + 'pts</span>' +
+      '</div>';
   }).join('');
 };
 
-// マッチプレイヤー一覧表示
-HostUI.prototype.updateMatchPlayerList = function (tournament) {
-  var list = tournament.matchPlayers;
-  var ul = document.getElementById('match-player-list');
-  if (!ul) return;
-  ul.innerHTML = list.map(function (p) {
-    return '<li>' + HostUI.escapeHtml(p.name) + ' (ID: ' + p.id + ')</li>';
-  }).join('');
-};
+// マッチエリア更新（投票開始/終了、勝者登録）
+HostUI.prototype.updateMatchArea = function (tournament, host) {
+  var self = this;
+  var state = tournament.getState();
+  var el = this.matchAreaEl;
 
-// マッチ一覧表示
-HostUI.prototype.updateMatchList = function (tournament) {
-  // update select options
-  var players = tournament.matchPlayers;
-  var p1 = document.getElementById('match-player1');
-  var p2 = document.getElementById('match-player2');
-  if (p1 && p2) {
-    var opts = '<option value="">Select...</option>';
-    for (var i = 0; i < players.length; i++) {
-      opts += '<option value="' + players[i].id + '">' + HostUI.escapeHtml(players[i].name) + '</option>';
+  if (state.status === 'idle') {
+    el.innerHTML = '<div class="empty-state">Start tournament to begin.</div>' +
+      '<button id="btn-start-tournament" class="btn-primary">Start Tournament</button>';
+    var btn = document.getElementById('btn-start-tournament');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        host.tournament.openChampionshipPredict();
+        host.broadcastTournamentState();
+        self.updateMatchArea(tournament, host);
+      });
     }
-    p1.innerHTML = opts;
-    p2.innerHTML = opts;
+    return;
+  }
+
+  if (state.champPredictOpen) {
+    el.innerHTML = '<div class="match-status">Championship predictions open — waiting for participants...</div>' +
+      '<button id="btn-close-predict" class="btn-primary">Close Predictions</button>';
+    var btn = document.getElementById('btn-close-predict');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        host.tournament.closeChampionshipPredict();
+        host.broadcastTournamentState();
+        host.broadcastRanking();
+        self.updateMatchArea(tournament, host);
+        self.updateRanking(tournament);
+      });
+    }
+    return;
+  }
+
+  if (state.status === 'finished') {
+    var winnerName = tournament.getPlayerName(state.tournamentWinnerId);
+    el.innerHTML = '<div class="match-status">Tournament Finished! Winner: <strong>' +
+      HostUI.escapeHtml(winnerName) + '</strong></div>';
+    return;
+  }
+
+  // inProgress: show match controls
+  var activeMatch = null;
+  var activeIdx = -1;
+  for (var i = 0; i < state.matches.length; i++) {
+    if (state.matches[i].winner === null) { activeMatch = state.matches[i]; activeIdx = i; break; }
+  }
+
+  if (!activeMatch) {
+    el.innerHTML = '<div class="match-status">All matches completed. ' +
+      '<button id="btn-finish-tournament" class="btn-primary">Finish Tournament</button></div>';
+    var btn = document.getElementById('btn-finish-tournament');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        var id = prompt('Tournament winner Player ID:');
+        if (id) { host.tournament.setTournamentWinner(id); host.broadcastTournamentState(); host.broadcastRanking(); self.updateMatchArea(tournament, host); self.updateRanking(tournament); }
+      });
+    }
+    return;
+  }
+
+  var p1Name = tournament.getPlayerName(activeMatch.player1Id);
+  var p2Name = tournament.getPlayerName(activeMatch.player2Id);
+
+  var html = '<div class="match-vs"><span class="player-name">' + HostUI.escapeHtml(p1Name) + '</span>' +
+    '<span class="vs-text">VS</span>' +
+    '<span class="player-name">' + HostUI.escapeHtml(p2Name) + '</span></div>';
+
+  html += '<div class="match-actions">';
+  html += '<button id="btn-toggle-vote" class="btn-vote-' + (activeMatch.votingOpen ? 'close' : 'open') + '">' +
+    (activeMatch.votingOpen ? 'Close Voting' : 'Open Voting') + '</button>';
+  html += '</div>';
+
+  html += '<div class="winner-row">';
+  html += '<select id="sel-winner" class="winner-select">';
+  html += '<option value="">— Select winner —</option>';
+  html += '<option value="' + activeMatch.player1Id + '">' + HostUI.escapeHtml(p1Name) + '</option>';
+  html += '<option value="' + activeMatch.player2Id + '">' + HostUI.escapeHtml(p2Name) + '</option>';
+  html += '</select>';
+  html += '<button id="btn-register-winner" class="btn-primary">Register Winner</button>';
+  html += '</div>';
+
+  // bet summary
+  var summary = tournament.getMatchBetSummary(activeMatch.id);
+  html += '<div class="bet-summary">';
+  html += '<div>' + HostUI.escapeHtml(p1Name) + ': <strong>' + summary.player1.count + ' bets</strong> (' + summary.player1.totalPoints + ' pts)</div>';
+  html += '<div>' + HostUI.escapeHtml(p2Name) + ': <strong>' + summary.player2.count + ' bets</strong> (' + summary.player2.totalPoints + ' pts)</div>';
+  html += '</div>';
+
+  // all matches indicator
+  html += '<div class="match-progress">Match ' + (activeIdx + 1) + ' / ' + state.matches.length + '</div>';
+
+  el.innerHTML = html;
+
+  // events
+  var voteBtn = document.getElementById('btn-toggle-vote');
+  if (voteBtn) {
+    voteBtn.addEventListener('click', function () {
+      if (activeMatch.votingOpen) { host.tournament.closeVoting(activeMatch.id); }
+      else { host.tournament.openVoting(activeMatch.id); }
+      host.broadcastTournamentState();
+      self.updateMatchArea(tournament, host);
+    });
+  }
+
+  var winnerBtn = document.getElementById('btn-register-winner');
+  if (winnerBtn) {
+    winnerBtn.addEventListener('click', function () {
+      var sel = document.getElementById('sel-winner');
+      if (sel && sel.value) {
+        host.tournament.setMatchWinner(activeMatch.id, sel.value);
+        host.broadcastTournamentState();
+        host.broadcastRanking();
+        self.updateMatchArea(tournament, host);
+        self.updateRanking(tournament);
+      }
+    });
   }
 };
 
-// 現在のマッチ情報表示
-HostUI.prototype.updateCurrentMatchInfo = function (tournament, matchId) {
-  if (!matchId) {
-    this.currentMatchInfo.textContent = 'No active match';
-    this.betSummaryEl.innerHTML = '';
-    return;
-  }
-  var match = tournament.getMatch(matchId);
-  if (!match) {
-    this.currentMatchInfo.textContent = 'No active match';
-    this.betSummaryEl.innerHTML = '';
-    return;
-  }
-  var p1Name = tournament.getPlayerName(match.player1Id);
-  var p2Name = tournament.getPlayerName(match.player2Id);
-  this.currentMatchInfo.innerHTML = '<strong>' + HostUI.escapeHtml(p1Name) + ' vs ' + HostUI.escapeHtml(p2Name) + '</strong>' +
-    ' - Voting: ' + (match.votingOpen ? '<span style="color:#2ecc71">OPEN</span>' : '<span style="color:#e74c3c">CLOSED</span>') +
-    (match.winner ? ' - Winner: ' + HostUI.escapeHtml(tournament.getPlayerName(match.winner)) : '');
-
-  // ベット集計
-  var summary = tournament.getMatchBetSummary(matchId);
-  this.betSummaryEl.innerHTML = '<h3>Bet Summary</h3>' +
-    '<p>' + HostUI.escapeHtml(p1Name) + ': ' + summary.player1.count + ' bets, ' + summary.player1.totalPoints + ' pts</p>' +
-    '<p>' + HostUI.escapeHtml(p2Name) + ': ' + summary.player2.count + ' bets, ' + summary.player2.totalPoints + ' pts</p>';
-};
-
-// ランキング表示
+// ランキング
 HostUI.prototype.updateRanking = function (tournament) {
   var rankings = tournament.getRankings();
-  var table = this.rankingEl;
-  table.innerHTML = '<tr><th>#</th><th>Name</th><th>Points</th><th>Prediction</th></tr>' +
+  this.rankingEl.innerHTML = '<tr><th>#</th><th>Name</th><th>Points</th><th>Prediction</th></tr>' +
     rankings.map(function (r, i) {
-      return '<tr>' +
-        '<td>' + (i + 1) + '</td>' +
+      return '<tr class="rank-row' + (i < 3 ? ' top-' + (i + 1) : '') + '">' +
+        '<td class="rank-num">' + (i + 1) + '</td>' +
         '<td>' + HostUI.escapeHtml(r.name) + '</td>' +
-        '<td>' + r.points + '</td>' +
+        '<td class="pts">' + r.points + '</td>' +
         '<td>' + HostUI.escapeHtml(r.champPredictName) + '</td>' +
         '</tr>';
     }).join('');
@@ -823,7 +731,6 @@ HostUI.prototype.updateRanking = function (tournament) {
 function startHost() {
   var container = document.getElementById('app');
   var ui = new HostUI(container);
-  var hostInstance = null;
 
   function attempt(retriesLeft) {
     if (retriesLeft <= 0) { ui.showError('Failed to create room after multiple attempts'); return; }
@@ -834,59 +741,49 @@ function startHost() {
       onError: function (msg) { console.error('Host error:', msg); },
       onReady: function (_peerId) {
         console.log('Host ready');
-        ui.tournamentStatusEl = document.getElementById('tournament-controls');
-        hostInstance = host;
-        ui.updateTournamentControls(host.tournament, host);
+        ui.updateMatchArea(host.tournament, host);
+        ui.updateParticipantList(host.tournament);
+        ui.updateRanking(host.tournament);
       },
       onPlayerJoined: function (_player) {
-        ui.updatePlayers(host.getPlayers());
-        ui.updateViewers(host.getViewerCount());
         ui.updateParticipantList(host.tournament);
         ui.updateRanking(host.tournament);
       },
       onPlayerLeft: function (_peerId) {
-        ui.updatePlayers(host.getPlayers());
         ui.updateParticipantList(host.tournament);
         ui.updateRanking(host.tournament);
       },
       onViewerJoined: function (_peerId) {
-        ui.updateViewers(host.getViewerCount());
         ui.updateParticipantList(host.tournament);
       },
       onViewerLeft: function (_peerId) {
-        ui.updateViewers(host.getViewerCount());
         ui.updateParticipantList(host.tournament);
       },
-      onVoteResultUpdated: function (results) { ui.updateResults(results); },
+      onVoteResultUpdated: function (_results) {},
       onTournamentUpdate: function () {
         ui.updateParticipantList(host.tournament);
         ui.updateRanking(host.tournament);
-        ui.updateTournamentControls(host.tournament, host);
+        ui.updateMatchArea(host.tournament, host);
       }
     };
 
     var host = new HostPeer(roomCode, callbacks);
     host.start().then(function () {
-      // マッチプレイヤー追加ボタン
       document.getElementById('add-player-btn').addEventListener('click', function () {
         var input = document.getElementById('new-player-name');
         var name = input.value.trim();
         if (name) {
-          var id = 'mp-' + Date.now();
-          host.tournament.matchPlayers.push({ id: id, name: name });
-          ui.updateMatchPlayerList(host.tournament);
-          ui.updateMatchList(host.tournament);
+          host.tournament.matchPlayers.push({ id: 'mp-' + Date.now(), name: name });
+          ui.updateMatchListSelects(host.tournament);
           input.value = '';
         }
       });
-      // マッチ追加ボタン
       document.getElementById('add-match-btn').addEventListener('click', function () {
         var p1 = document.getElementById('match-player1');
         var p2 = document.getElementById('match-player2');
         if (p1.value && p2.value && p1.value !== p2.value) {
           host.tournament.addMatch(p1.value, p2.value);
-          ui.updateMatchList(host.tournament);
-          ui.updateTournamentControls(host.tournament, host);
+          ui.updateMatchArea(host.tournament, host);
         }
       });
     }).catch(function () {
@@ -898,5 +795,19 @@ function startHost() {
 
   attempt(10);
 }
+
+// マッチ作成用セレクトボックス更新
+HostUI.prototype.updateMatchListSelects = function (tournament) {
+  var players = tournament.matchPlayers;
+  var p1 = document.getElementById('match-player1');
+  var p2 = document.getElementById('match-player2');
+  if (!p1 || !p2) return;
+  var opts = '<option value="">Select player...</option>';
+  for (var i = 0; i < players.length; i++) {
+    opts += '<option value="' + players[i].id + '">' + HostUI.escapeHtml(players[i].name) + '</option>';
+  }
+  p1.innerHTML = opts;
+  p2.innerHTML = opts;
+};
 
 startHost();

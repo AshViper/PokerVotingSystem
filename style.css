@@ -1,7 +1,5 @@
-/* ===== 全体のリセット ===== */
+/* ===== ベース ===== */
 * { box-sizing: border-box; margin: 0; padding: 0; }
-
-/* ===== ページ全体のレイアウト ===== */
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: #1a1a2e;
@@ -9,118 +7,216 @@ body {
   min-height: 100vh;
   display: flex;
   justify-content: center;
-  padding: 2rem;
+  padding: 1rem;
 }
-#app { max-width: 800px; width: 100%; }
+#app { max-width: 720px; width: 100%; }
 
 /* ===== 見出し ===== */
-h1 { color: #e94560; margin-bottom: 1rem; }
-h2 { color: #0f3460; margin: 1rem 0 0.5rem; font-size: 1.1rem; }
+h1 { color: #e94560; font-size: 1.4rem; margin-bottom: 1rem; }
 
-/* ===== 区切り ===== */
-hr { border: none; border-top: 1px solid #333; margin: 1rem 0; }
-
-/* ===== ルームコード表示 ===== */
-.room-code {
-  font-size: 2.5rem;
+/* ===== カード/セクション ===== */
+.section { margin-bottom: 1rem; }
+.section-title {
+  color: #e94560;
   font-weight: bold;
-  letter-spacing: 0.5rem;
-  text-align: center;
-  padding: 1rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #333;
+}
+
+/* ===== ヘッダー行（Host: QR + Room Code） ===== */
+.header-row {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.room-block { flex: 1; min-width: 160px; }
+.room-label { color: #888; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.25rem; }
+.room-code {
+  font-size: 2.2rem;
+  font-weight: bold;
+  letter-spacing: 0.4rem;
   background: #16213e;
   border-radius: 8px;
-  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  font-family: monospace;
 }
+.qr-code canvas { display: block; border-radius: 6px; }
 
-/* ===== QRコード ===== */
-.qr-code { text-align: center; margin: 1rem 0; }
-.qr-code canvas { max-width: 200px; }
+/* ===== 参加者（Host） ===== */
+.participant-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.participant-chip {
+  background: #16213e;
+  padding: 0.35rem 0.7rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.participant-chip .pts { color: #f1c40f; margin-left: 0.3rem; font-weight: bold; }
+.participant-chip.spectator { opacity: 0.5; }
 
-/* ===== 入力・ボタン ===== */
-input, button, select {
-  padding: 0.5rem 0.75rem;
-  margin: 0.25rem;
+/* ===== マッチカード（Host） ===== */
+.match-card {
+  background: #16213e;
+  border-radius: 8px;
+  padding: 1rem;
+}
+.empty-state { color: #666; font-size: 0.9rem; margin-bottom: 0.5rem; }
+.match-status { color: #888; margin-bottom: 0.5rem; }
+.match-vs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+.player-name { font-size: 1.1rem; font-weight: bold; color: #eee; }
+.vs-text { color: #e94560; font-weight: bold; font-size: 0.9rem; }
+.match-actions { text-align: center; margin: 0.5rem 0; }
+.winner-row { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+.winner-select { flex: 1; background: #0f3460; color: #eee; padding: 0.5rem; border: none; border-radius: 4px; }
+.bet-summary {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: #aaa;
+}
+.match-progress { text-align: center; font-size: 0.75rem; color: #555; margin-top: 0.5rem; }
+
+/* ===== セットアップ行（Host） ===== */
+.setup-row { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
+.setup-row input { flex: 1; }
+
+/* ===== ボタン ===== */
+button, .btn-primary {
+  padding: 0.5rem 1rem;
   border: none;
   border-radius: 4px;
-  font-size: 0.95rem;
-}
-input, select { background: #16213e; color: #eee; }
-button {
+  font-size: 0.9rem;
+  font-weight: bold;
+  cursor: pointer;
   background: #e94560;
   color: #fff;
-  cursor: pointer;
-  font-weight: bold;
 }
 button:hover { background: #c73650; }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-vote-open { background: #2ecc71; color: #fff; }
+.btn-vote-open:hover { background: #27ae60; }
+.btn-vote-close { background: #e74c3c; color: #fff; }
+.btn-vote-close:hover { background: #c0392b; }
 
-/* ===== テーブル ===== */
-table { border-collapse: collapse; }
-th, td { padding: 0.5rem; text-align: left; border-bottom: 1px solid #333; }
-th { color: #e94560; }
-
-/* ===== リスト ===== */
-ul { list-style: none; }
-li {
-  padding: 0.5rem;
-  background: #16213e;
-  margin: 0.25rem 0;
+/* ===== 入力・セレクト ===== */
+input, select {
+  padding: 0.5rem 0.7rem;
+  border: none;
   border-radius: 4px;
-}
-
-/* ===== 投票者用プレイヤー選択 ===== */
-.player-option {
-  display: block;
-  padding: 0.5rem;
-  margin: 0.25rem 0;
+  font-size: 0.9rem;
   background: #16213e;
-  border-radius: 4px;
-  cursor: pointer;
+  color: #eee;
 }
-.player-option input { width: auto; margin-right: 0.5rem; display: inline; }
+input:focus, select:focus { outline: 2px solid #e94560; }
 
-/* ===== ステータス表示 ===== */
-.status { margin-top: 0.5rem; padding: 0.5rem; border-radius: 4px; }
-.status.connected { background: #2ecc71; color: #fff; }
+/* ===== テーブル（ランキング） ===== */
+.rank-table { width: 100%; border-collapse: collapse; }
+.rank-table th {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  color: #888;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  border-bottom: 1px solid #333;
+}
+.rank-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid #222; font-size: 0.9rem; }
+.rank-row.top-1 td:first-child { color: #f1c40f; font-weight: bold; }
+.rank-row.top-2 td:first-child { color: #bdc3c7; font-weight: bold; }
+.rank-row.top-3 td:first-child { color: #cd7f32; font-weight: bold; }
+.rank-num { width: 2rem; text-align: center; }
+.pts { color: #f1c40f; font-weight: bold; }
+
+/* ===== ステータス ===== */
+.status { margin-top: 0.5rem; padding: 0.5rem; border-radius: 4px; font-size: 0.85rem; }
 .status.error { background: #e74c3c; color: #fff; }
+.status.connected { background: #2ecc71; color: #fff; }
 
-/* ===== 投票結果 ===== */
-.result-item {
-  padding: 0.5rem;
-  margin: 0.25rem 0;
-  background: #16213e;
-  border-radius: 4px;
-}
-
-/* ===== ランディングページ ===== */
+/* ===== ランディング ===== */
 .landing { text-align: center; }
 .landing hr { margin: 1.5rem 0; border-color: #333; }
 
-/* ===== 参加フォーム ===== */
-.join-form input { margin-bottom: 0.5rem; }
-
-/* ===== タブ ===== */
-.nav-tab {
-  border: 1px solid #444;
+/* ===== プレイヤーヘッダー ===== */
+.player-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.header-left { display: flex; flex-direction: column; gap: 0.15rem; }
+.room-badge {
+  font-size: 0.75rem;
+  color: #888;
   background: #16213e;
-  color: #eee;
-  padding: 0.5rem;
+  padding: 0.2rem 0.5rem;
   border-radius: 4px;
+  display: inline-block;
+  width: fit-content;
+}
+.player-greeting { font-size: 1.1rem; font-weight: bold; }
+.points-badge {
+  background: #f1c40f;
+  color: #1a1a2e;
+  font-weight: bold;
+  font-size: 1.2rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+/* ===== プレイヤー選択グリッド（Player） ===== */
+.player-select-grid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.5rem 0; }
+.player-card {
+  flex: 1;
+  min-width: 100px;
+  background: #16213e;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 1rem 0.5rem;
+  text-align: center;
   cursor: pointer;
-  opacity: 0.5;
+  transition: border-color 0.15s;
 }
-.nav-tab:hover { opacity: 0.8; }
+.player-card:hover { border-color: #e94560; }
+.player-card input { display: none; }
+.player-card input:checked + .card-name { color: #e94560; }
+.player-card input:checked ~ .card-name { color: #e94560; }
+.player-card:has(input:checked) { border-color: #e94560; background: #0f3460; }
+.card-name { font-weight: bold; font-size: 1rem; }
 
-/* ===== マッチカード ===== */
-.match-card {
-  border: 1px solid #444;
-  padding: 8px;
-  margin: 4px;
-  border-radius: 4px;
-  min-width: 200px;
-  background: #16213e;
+/* ===== ベット行 ===== */
+.bet-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0; }
+.bet-row label { min-width: 100px; color: #aaa; font-size: 0.9rem; }
+.bet-select { flex: 1; }
+.bet-input { width: 100px; }
+
+/* ===== 情報メッセージ ===== */
+.info-msg { color: #888; font-size: 0.9rem; padding: 0.5rem 0; }
+.hint { color: #666; font-size: 0.8rem; margin-bottom: 0.3rem; }
+.result-box {
+  text-align: center;
+  padding: 0.5rem;
+  background: #0f3460;
+  border-radius: 6px;
+  margin: 0.5rem 0;
 }
-
-/* ===== フレックスレイアウト ===== */
-.flex-row { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
-.flex-row input, .flex-row select { flex: 1; min-width: 100px; }
