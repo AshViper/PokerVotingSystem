@@ -6,13 +6,16 @@ let voterName = '';
 let viewerPoints = 100;
 let viewerId = '';
 
+let currentRoundId = null; // スマホ側で現在のラウンドを追跡する変数
+
 let room = {
     roomCode: '',
     players: [],
     voters: [], // { id, name, points, tournamentPredId }
     voteState: 'WAITING', // WAITING | PREDICTION | VOTING | ENDED
     votes: [],
-    selectedWinnerId: null
+    selectedWinnerId: null,
+    roundId: null // マッチごとの識別ID
 };
 
 let selectedVotePlayerId = null;
@@ -89,14 +92,13 @@ function joinAsVote() {
     initVoteClient(code);
 }
 
-// 起動時: QRコードアクセス（role=vote）なら前回のキャッシュを消去して新規アクセス扱いにする
+// 起動時: QRコードアクセス（role=vote）なら前回のキャッシュを消去
 window.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
     const role = params.get('role');
     const code = params.get('room');
 
     if (role === 'vote' && code) {
-        // 前回の参加者データをクリア
         localStorage.removeItem('voter_name');
         localStorage.removeItem('viewer_points');
         localStorage.removeItem('viewer_id');
@@ -180,11 +182,11 @@ function handleHostData(conn, data) {
 
         case 'SUBMIT_VOTE':
             if (room.voteState === 'VOTING') {
-                // 重複投票ガード
+                // 重複投票ガード（同じラウンドでの二重受信を防ぐ）
                 if (!room.votes.find(v => v.viewerId === payload.viewerId)) {
                     room.votes.push(payload);
                     let voter = room.voters.find(x => x.id === payload.viewerId);
-                    if (voter) voter.points -= payload.betPoint;
+                    if (voter) voter.points -= payload.betPoint; // ポイント引落し
                     broadcastState();
                 }
             }
@@ -215,12 +217,12 @@ function startPrediction() {
     broadcastState();
 }
 
+// ★「マッチ投票開始」を押すと新しいラウンドを開始
 function startVoting() {
-    if (room.voteState === 'ENDED') {
-        room.votes = [];
-        room.selectedWinnerId = null;
-    }
+    room.votes = []; // 過去の投票リセット
+    room.selectedWinnerId = null; // 過去の勝者リセット
     room.voteState = 'VOTING';
+    room.roundId = 'round_' + Date.now(); // 新しいラウンドIDを発行
     broadcastState();
 }
 
@@ -234,13 +236,22 @@ function selectWinner(playerId) {
     updateHostUI();
 }
 
+// ★ 勝者確定 & ポイント配当計算処理
 function announceWinner() {
-    if (!room.selectedWinnerId) return;
+    if (!room.selectedWinnerId) {
+        return alert('勝者（プレイヤー）をリストから選択してください。');
+    }
+    if (room.voteState === 'ENDED') {
+        return alert('このマッチの結果計算は既に完了しています。');
+    }
 
+    // 的中者に配当（2倍）を加算
     room.votes.forEach(v => {
         if (v.playerId === room.selectedWinnerId) {
             let voter = room.voters.find(x => x.id === v.viewerId);
-            if (voter) voter.points += v.betPoint * 2;
+            if (voter) {
+                voter.points += v.betPoint * 2;
+            }
         }
     });
 
@@ -290,13 +301,18 @@ function updateHostUI() {
 
     const startBtn = document.getElementById('btn-start-vote');
     const endBtn = document.getElementById('btn-end-vote');
-    if (startBtn) startBtn.disabled = room.voteState === 'VOTING';
-    if (endBtn) endBtn.disabled = room.voteState !== 'VOTING';
+    const calcBtn = document.getElementById('btn-calc-result');
+
+    if (startBtn) startBtn.disabled = (room.voteState === 'VOTING');
+    if (endBtn) endBtn.disabled = (room.voteState !== 'VOTING');
+
+    // 勝者が選ばれていて、まだ配当完了(ENDED)していない場合に計算ボタンを有効化
+    if (calcBtn) {
+        calcBtn.disabled = !room.selectedWinnerId || room.voteState === 'ENDED';
+    }
 
     const winnerSec = document.getElementById('winner-select-section');
     if (winnerSec) winnerSec.style.display = room.players.length > 0 ? 'block' : 'none';
-    const calcBtn = document.getElementById('btn-calc-result');
-    if (calcBtn) calcBtn.disabled = !room.selectedWinnerId || room.voteState !== 'ENDED';
 }
 
 // ================= クライアント共通 / Player / Vote =================
@@ -317,23 +333,53 @@ function connectToHost(code, { onOpen, onFail } = {}) {
 
 function handleClientData(data) {
     if (data.type === 'SYNC_STATE') {
-        const prevState = room.voteState;
         room = data.payload;
 
+        // 自分のポイント情報を更新
         let myVoter = room.voters.find(x => x.id === viewerId);
         if (myVoter) {
             viewerPoints = myVoter.points;
-            updateViewerPoints(0);
+            localStorage.setItem('viewer_points', viewerPoints);
+            const ptElem = document.getElementById('viewer-points');
+            if (ptElem) ptElem.innerText = viewerPoints;
         }
 
-        if (room.voteState === 'VOTING' && room.votes.length === 0 && (prevState === 'ENDED' || prevState === 'WAITING')) {
-            voteSubmittedLocally = false;
+        // ★ 新しいマッチ投票が開始された場合（roundIdの更新を検知）
+        if (room.roundId && room.roundId !== currentRoundId) {
+            currentRoundId = room.roundId;
+            voteSubmittedLocally = false; // 送信ロックを解除
             selectedVotePlayerId = null;
             const banner = document.getElementById('vote-result-banner');
             if (banner) banner.innerHTML = '';
         }
 
+        // 結果発表（ENDED）時の勝敗結果表示
+        if (room.voteState === 'ENDED' && room.selectedWinnerId) {
+            showVoteResultBanner();
+        }
+
         updateVoteUI();
+    }
+}
+
+function showVoteResultBanner() {
+    const banner = document.getElementById('vote-result-banner');
+    if (!banner) return;
+
+    const myVote = room.votes.find(v => v.viewerId === viewerId);
+    if (!myVote) {
+        banner.className = 'result-banner';
+        banner.innerHTML = 'このマッチは未投票です';
+        return;
+    }
+
+    if (myVote.playerId === room.selectedWinnerId) {
+        const winPt = myVote.betPoint * 2;
+        banner.className = 'result-banner result-win';
+        banner.innerHTML = `🎉 予想的中！ +${winPt} pt 獲得！`;
+    } else {
+        banner.className = 'result-banner result-lose';
+        banner.innerHTML = `💀 残念... 予想外れ (-${myVote.betPoint} pt)`;
     }
 }
 
@@ -355,14 +401,13 @@ function joinGame() {
     });
 }
 
-// Vote 名前登録 (連打・重複送信防止付き)
 function registerVoter() {
     const nameInput = document.getElementById('input-voter-name');
     const name = nameInput ? nameInput.value.trim() : '';
     if (!name) return alert('名前を入力してください。');
 
     const btn = document.getElementById('btn-register-voter');
-    if (btn) btn.disabled = true; // 連打防止
+    if (btn) btn.disabled = true;
 
     voterName = name;
     localStorage.setItem('voter_name', voterName);
@@ -388,13 +433,6 @@ function setVoteConnectStatus(text) {
     if (el) el.innerText = text;
 }
 
-function updateViewerPoints(delta) {
-    viewerPoints += delta;
-    const ptElem = document.getElementById('viewer-points');
-    if (ptElem) ptElem.innerText = viewerPoints;
-}
-
-// 優勝予想送信 (連打・重複送信防止付き)
 function submitPrediction() {
     if (!selectedPredPlayerId) return alert('選手を選択してください。');
 
@@ -411,6 +449,7 @@ function submitPrediction() {
 }
 
 function selectVotePlayer(id) {
+    if (voteSubmittedLocally) return; // 送信後は選択不可
     selectedVotePlayerId = id;
     updateVoteUI();
 }
@@ -420,26 +459,25 @@ function selectPredPlayer(id) {
     updateVoteUI();
 }
 
-// 賭け投票送信 (連打・重複送信防止付き)
+// ★ 賭け投票送信（一度送信したらホストが「マッチ投票開始」を押すまで固定）
 function submitVote() {
-    if (voteSubmittedLocally) return;
+    if (voteSubmittedLocally || room.voteState !== 'VOTING') {
+        return alert('現在は投票できないか、すでに送信済みです。');
+    }
 
     const betInput = parseInt(document.getElementById('input-bet-point').value);
     if (!selectedVotePlayerId || isNaN(betInput) || betInput <= 0 || betInput > viewerPoints) {
-        return alert('正しい内容を選択・入力してください。');
+        return alert('正しい選手を選択し、所持ポイント以下の賭けポイントを入力してください。');
     }
 
+    // 送信済みフラグをオン
     voteSubmittedLocally = true;
-    const submitBtn = document.getElementById('btn-submit-vote');
-    if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.innerText = '投票済み';
-    }
 
     hostConn.send({
         type: 'SUBMIT_VOTE',
         payload: { viewerId, playerId: selectedVotePlayerId, betPoint: betInput }
     });
+
     updateVoteUI();
 }
 
@@ -471,9 +509,18 @@ function updateVoteUI() {
         `).join('');
     }
 
+    // 送信ボタンの状態制御
     if (submitBtn) {
-        submitBtn.disabled = room.voteState !== 'VOTING' || voteSubmittedLocally;
-        submitBtn.innerText = voteSubmittedLocally ? '投票済み' : '投票する';
+        if (voteSubmittedLocally) {
+            submitBtn.disabled = true;
+            submitBtn.innerText = '投票済み';
+        } else if (room.voteState !== 'VOTING') {
+            submitBtn.disabled = true;
+            submitBtn.innerText = '投票期間外';
+        } else {
+            submitBtn.disabled = false;
+            submitBtn.innerText = '投票する';
+        }
     }
 }
 
