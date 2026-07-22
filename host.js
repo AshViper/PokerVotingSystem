@@ -595,14 +595,15 @@ HostUI.prototype.render = function () {
   ].join('');
 };
 HostUI.prototype.displayRoomCode = function (code) {
-  var self = this;
   this.roomCodeElement.textContent = code;
   var viewerUrl = buildViewerUrl(code);
   if (typeof QRCode !== 'undefined') {
-    QRCode.toCanvas(viewerUrl, { width: 200 }).then(function (canvas) {
-      self.qrContainer.innerHTML = '';
-      self.qrContainer.appendChild(canvas);
-    }).catch(function () { self.qrContainer.innerHTML = '<p>QR generation failed</p>'; });
+    this.qrContainer.innerHTML = '';
+    new QRCode(this.qrContainer, {
+      text: viewerUrl,
+      width: 200,
+      height: 200
+    });
   } else { this.qrContainer.innerHTML = '<p>QR not available</p>'; }
 };
 HostUI.prototype.updatePlayers = function (players) {
