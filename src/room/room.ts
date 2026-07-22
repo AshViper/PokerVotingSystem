@@ -8,7 +8,12 @@ export function generateRoomCode(): string {
 }
 
 export function buildViewerUrl(baseUrl: string, roomCode: string): string {
-  const url = new URL(baseUrl);
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    url = new URL(window.location.href);
+  }
   url.searchParams.set('room', roomCode);
   url.searchParams.set('type', 'voter');
   return url.toString();
