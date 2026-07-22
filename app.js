@@ -6,16 +6,16 @@ let voterName = '';
 let viewerPoints = 100;
 let viewerId = '';
 
-let currentRoundId = null; // スマホ側で現在のラウンドを追跡する変数
+let currentRoundId = null;
 
 let room = {
     roomCode: '',
     players: [],
-    voters: [], // { id, name, points, tournamentPredId }
-    voteState: 'WAITING', // WAITING | PREDICTION | VOTING | ENDED
-    votes: [],
+    voters: [],
+    voteState: 'WAITING', // WAITING | PREDICTION | VOTING | CLOSED | ENDED
+    votes: [], // { viewerId, playerId, betPoint }
     selectedWinnerId: null,
-    roundId: null // マッチごとの識別ID
+    roundId: null
 };
 
 let selectedVotePlayerId = null;
@@ -92,7 +92,7 @@ function joinAsVote() {
     initVoteClient(code);
 }
 
-// 起動時: QRコードアクセス（role=vote）なら前回のキャッシュを消去
+// 起動時: QRコードアクセス（role=vote）なら前回のキャッシュを初期化
 window.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
     const role = params.get('role');
@@ -182,11 +182,10 @@ function handleHostData(conn, data) {
 
         case 'SUBMIT_VOTE':
             if (room.voteState === 'VOTING') {
-                // 重複投票ガード（同じラウンドでの二重受信を防ぐ）
                 if (!room.votes.find(v => v.viewerId === payload.viewerId)) {
                     room.votes.push(payload);
                     let voter = room.voters.find(x => x.id === payload.viewerId);
-                    if (voter) voter.points -= payload.betPoint; // ポイント引落し
+                    if (voter) voter.points -= payload.betPoint; // ポイント差し引き
                     broadcastState();
                 }
             }
@@ -217,35 +216,37 @@ function startPrediction() {
     broadcastState();
 }
 
-// ★「マッチ投票開始」を押すと新しいラウンドを開始
 function startVoting() {
-    room.votes = []; // 過去の投票リセット
-    room.selectedWinnerId = null; // 過去の勝者リセット
+    room.votes = [];
+    room.selectedWinnerId = null;
     room.voteState = 'VOTING';
-    room.roundId = 'round_' + Date.now(); // 新しいラウンドIDを発行
+    room.roundId = 'round_' + Date.now();
     broadcastState();
 }
 
+// 投票締切 (VOTING -> CLOSED)
 function endVoting() {
-    room.voteState = 'ENDED';
+    if (room.voteState !== 'VOTING') return;
+    room.voteState = 'CLOSED';
     broadcastState();
 }
 
+// プレイヤー選択
 function selectWinner(playerId) {
     room.selectedWinnerId = playerId;
-    updateHostUI();
+    broadcastState();
 }
 
-// ★ 勝者確定 & ポイント配当計算処理
+// 勝者決定・ポイント計算 (CLOSED -> ENDED)
 function announceWinner() {
-    if (!room.selectedWinnerId) {
-        return alert('勝者（プレイヤー）をリストから選択してください。');
+    if (room.voteState !== 'CLOSED') {
+        return alert('まず「投票締切」を押して投票を締め切ってください。');
     }
-    if (room.voteState === 'ENDED') {
-        return alert('このマッチの結果計算は既に完了しています。');
+    if (!room.selectedWinnerId) {
+        return alert('左側のプレイヤー一覧から勝者を選択してください。');
     }
 
-    // 的中者に配当（2倍）を加算
+    // 的中者に配当加算 (賭けポイントの2倍＝元の賭け分＋獲得分)
     room.votes.forEach(v => {
         if (v.playerId === room.selectedWinnerId) {
             let voter = room.voters.find(x => x.id === v.viewerId);
@@ -263,15 +264,14 @@ function endTournament() {
     const sorted = [...room.voters].sort((a, b) => b.points - a.points).slice(0, 10);
     const listEl = document.getElementById('ranking-list');
 
-    listEl.innerHTML = sorted.length > 0
-        ? sorted.map(v => `<li><strong>${escapeHtml(v.name)}</strong>: ${v.points} pt</li>`).join('')
-        : '<li>参加者がいません</li>';
+    if (listEl) {
+        listEl.innerHTML = sorted.length > 0
+            ? sorted.map(v => `<li><strong>${escapeHtml(v.name)}</strong>: ${v.points} pt</li>`).join('')
+            : '<li>参加者がいません</li>';
+    }
 
-    document.getElementById('ranking-modal').style.display = 'block';
-}
-
-function closeRanking() {
-    document.getElementById('ranking-modal').style.display = 'none';
+    const modal = document.getElementById('ranking-modal');
+    if (modal) modal.style.display = 'block';
 }
 
 function updateHostUI() {
@@ -288,7 +288,7 @@ function updateHostUI() {
                 return `
                   <div class="list-item selectable-item ${isSelected ? 'active' : ''}" onclick="selectWinner('${p.id}')">
                     <span><strong>${escapeHtml(p.name)}</strong></span>
-                    ${isSelected ? '<span class="badge badge-voting">勝者選択中</span>' : ''}
+                    ${isSelected ? '<span class="badge badge-success">勝者選択中</span>' : ''}
                   </div>`;
             }).join('');
         }
@@ -299,20 +299,15 @@ function updateHostUI() {
         badge.innerText = '状態: ' + room.voteState;
     }
 
-    const startBtn = document.getElementById('btn-start-vote');
-    const endBtn = document.getElementById('btn-end-vote');
+    const startPredBtn = document.getElementById('btn-start-pred');
+    const startVoteBtn = document.getElementById('btn-start-vote');
+    const endVoteBtn = document.getElementById('btn-end-vote');
     const calcBtn = document.getElementById('btn-calc-result');
 
-    if (startBtn) startBtn.disabled = (room.voteState === 'VOTING');
-    if (endBtn) endBtn.disabled = (room.voteState !== 'VOTING');
-
-    // 勝者が選ばれていて、まだ配当完了(ENDED)していない場合に計算ボタンを有効化
-    if (calcBtn) {
-        calcBtn.disabled = !room.selectedWinnerId || room.voteState === 'ENDED';
-    }
-
-    const winnerSec = document.getElementById('winner-select-section');
-    if (winnerSec) winnerSec.style.display = room.players.length > 0 ? 'block' : 'none';
+    if (startPredBtn) startPredBtn.disabled = (room.voteState === 'VOTING' || room.voteState === 'CLOSED');
+    if (startVoteBtn) startVoteBtn.disabled = (room.voteState === 'VOTING');
+    if (endVoteBtn) endVoteBtn.disabled = (room.voteState !== 'VOTING');
+    if (calcBtn) calcBtn.disabled = (room.voteState !== 'CLOSED' || !room.selectedWinnerId);
 }
 
 // ================= クライアント共通 / Player / Vote =================
@@ -335,7 +330,7 @@ function handleClientData(data) {
     if (data.type === 'SYNC_STATE') {
         room = data.payload;
 
-        // 自分のポイント情報を更新
+        // 自分の最新ポイントを更新・同期
         let myVoter = room.voters.find(x => x.id === viewerId);
         if (myVoter) {
             viewerPoints = myVoter.points;
@@ -344,42 +339,14 @@ function handleClientData(data) {
             if (ptElem) ptElem.innerText = viewerPoints;
         }
 
-        // ★ 新しいマッチ投票が開始された場合（roundIdの更新を検知）
+        // 新しいマッチ投票開始の検知
         if (room.roundId && room.roundId !== currentRoundId) {
             currentRoundId = room.roundId;
-            voteSubmittedLocally = false; // 送信ロックを解除
+            voteSubmittedLocally = false;
             selectedVotePlayerId = null;
-            const banner = document.getElementById('vote-result-banner');
-            if (banner) banner.innerHTML = '';
-        }
-
-        // 結果発表（ENDED）時の勝敗結果表示
-        if (room.voteState === 'ENDED' && room.selectedWinnerId) {
-            showVoteResultBanner();
         }
 
         updateVoteUI();
-    }
-}
-
-function showVoteResultBanner() {
-    const banner = document.getElementById('vote-result-banner');
-    if (!banner) return;
-
-    const myVote = room.votes.find(v => v.viewerId === viewerId);
-    if (!myVote) {
-        banner.className = 'result-banner';
-        banner.innerHTML = 'このマッチは未投票です';
-        return;
-    }
-
-    if (myVote.playerId === room.selectedWinnerId) {
-        const winPt = myVote.betPoint * 2;
-        banner.className = 'result-banner result-win';
-        banner.innerHTML = `🎉 予想的中！ +${winPt} pt 獲得！`;
-    } else {
-        banner.className = 'result-banner result-lose';
-        banner.innerHTML = `💀 残念... 予想外れ (-${myVote.betPoint} pt)`;
     }
 }
 
@@ -449,7 +416,7 @@ function submitPrediction() {
 }
 
 function selectVotePlayer(id) {
-    if (voteSubmittedLocally) return; // 送信後は選択不可
+    if (voteSubmittedLocally) return;
     selectedVotePlayerId = id;
     updateVoteUI();
 }
@@ -459,7 +426,6 @@ function selectPredPlayer(id) {
     updateVoteUI();
 }
 
-// ★ 賭け投票送信（一度送信したらホストが「マッチ投票開始」を押すまで固定）
 function submitVote() {
     if (voteSubmittedLocally || room.voteState !== 'VOTING') {
         return alert('現在は投票できないか、すでに送信済みです。');
@@ -470,7 +436,6 @@ function submitVote() {
         return alert('正しい選手を選択し、所持ポイント以下の賭けポイントを入力してください。');
     }
 
-    // 送信済みフラグをオン
     voteSubmittedLocally = true;
 
     hostConn.send({
@@ -481,46 +446,143 @@ function submitVote() {
     updateVoteUI();
 }
 
+// 投票結果集計HTML生成
+function renderVoteSummary() {
+    if (!room.players || room.players.length === 0) return '';
+
+    const counts = {};
+    room.players.forEach(p => counts[p.id] = 0);
+    room.votes.forEach(v => {
+        if (counts[v.playerId] !== undefined) {
+            counts[v.playerId]++;
+        }
+    });
+
+    let html = '<div style="margin-top:1.2rem; text-align:left; background:rgba(15, 23, 42, 0.6); padding:1rem; border-radius:8px; border:1px solid var(--card-border);">';
+    html += '<h4 style="margin-bottom:0.5rem; text-align:center;">📊 投票結果集計</h4>';
+    room.players.forEach(p => {
+        html += `<div style="display:flex; justify-content:space-between; margin-bottom:0.3rem;">
+                    <span>${escapeHtml(p.name)}</span>
+                    <strong>${counts[p.id] || 0}票</strong>
+                 </div>`;
+    });
+    html += '</div>';
+    return html;
+}
+
 function updateVoteUI() {
     const badge = document.getElementById('vote-state-badge');
-    const submitBtn = document.getElementById('btn-submit-vote');
-    const predSec = document.getElementById('prediction-section');
-
     if (badge) badge.innerText = room.voteState;
 
+    const voteFormArea = document.getElementById('vote-form-area');
+    const resultSec = document.getElementById('vote-result-section');
+
+    const predSec = document.getElementById('prediction-section');
     if (predSec) {
         predSec.style.display = room.voteState === 'PREDICTION' ? 'block' : 'none';
-        const predList = document.getElementById('pred-player-list');
-        if (predList && room.players.length > 0) {
-            predList.innerHTML = room.players.map(p => `
-                <div class="list-item selectable-item ${selectedPredPlayerId === p.id ? 'active' : ''}" onclick="selectPredPlayer('${p.id}')">
+        if (room.voteState === 'PREDICTION') {
+            const predList = document.getElementById('pred-player-list');
+            if (predList && room.players.length > 0) {
+                predList.innerHTML = room.players.map(p => `
+                    <div class="list-item selectable-item ${selectedPredPlayerId === p.id ? 'active' : ''}" onclick="selectPredPlayer('${p.id}')">
+                        <span>${escapeHtml(p.name)}</span>
+                    </div>
+                `).join('');
+            }
+        }
+    }
+
+    // 1. VOTING 状態
+    if (room.voteState === 'VOTING') {
+        if (voteFormArea) voteFormArea.style.display = 'block';
+        if (resultSec) resultSec.style.display = 'none';
+
+        const voteList = document.getElementById('vote-player-list');
+        if (voteList && room.players.length > 0) {
+            voteList.innerHTML = room.players.map(p => `
+                <div class="list-item selectable-item ${selectedVotePlayerId === p.id ? 'active' : ''}" onclick="${voteSubmittedLocally ? '' : `selectVotePlayer('${p.id}')`}">
                     <span>${escapeHtml(p.name)}</span>
                 </div>
             `).join('');
         }
-    }
 
-    const voteList = document.getElementById('vote-player-list');
-    if (voteList && room.players.length > 0) {
-        voteList.innerHTML = room.players.map(p => `
-            <div class="list-item selectable-item ${selectedVotePlayerId === p.id ? 'active' : ''}" onclick="selectVotePlayer('${p.id}')">
-                <span>${escapeHtml(p.name)}</span>
-            </div>
-        `).join('');
-    }
-
-    // 送信ボタンの状態制御
-    if (submitBtn) {
-        if (voteSubmittedLocally) {
-            submitBtn.disabled = true;
-            submitBtn.innerText = '投票済み';
-        } else if (room.voteState !== 'VOTING') {
-            submitBtn.disabled = true;
-            submitBtn.innerText = '投票期間外';
-        } else {
-            submitBtn.disabled = false;
-            submitBtn.innerText = '投票する';
+        const submitBtn = document.getElementById('btn-submit-vote');
+        if (submitBtn) {
+            submitBtn.disabled = voteSubmittedLocally;
+            submitBtn.innerText = voteSubmittedLocally ? '投票済み' : '投票する';
         }
+    }
+    // 2. CLOSED (締切) 状態
+    else if (room.voteState === 'CLOSED') {
+        if (voteFormArea) voteFormArea.style.display = 'none';
+        if (resultSec) {
+            resultSec.style.display = 'block';
+            resultSec.innerHTML = `
+                <div style="text-align: center; padding: 1rem 0;">
+                    <h3 style="color: var(--warning);">🔒 投票締め切り</h3>
+                    <p class="subtitle">試合結果と勝者決定を待っています...</p>
+                    ${renderVoteSummary()}
+                </div>
+            `;
+        }
+    }
+    // 3. ENDED (結果発表) 状態
+    else if (room.voteState === 'ENDED') {
+        if (voteFormArea) voteFormArea.style.display = 'none';
+        if (resultSec) {
+            resultSec.style.display = 'block';
+
+            const winner = room.players.find(p => p.id === room.selectedWinnerId);
+            const winnerName = winner ? escapeHtml(winner.name) : '未設定';
+
+            const myVote = room.votes.find(v => v.viewerId === viewerId);
+            const myVotedPlayer = myVote ? room.players.find(p => p.id === myVote.playerId) : null;
+            const myVotedName = myVotedPlayer ? escapeHtml(myVotedPlayer.name) : (myVote ? '不明' : '未投票');
+
+            let isWin = false;
+            let pointDiffText = '0pt';
+            let statusBadge = '';
+
+            if (myVote) {
+                if (myVote.playerId === room.selectedWinnerId) {
+                    isWin = true;
+                    pointDiffText = `+${myVote.betPoint * 2}pt`;
+                    statusBadge = '<div style="font-size: 1.5rem; color: var(--success); font-weight: bold; margin: 0.5rem 0;">✅ 的中</div>';
+                } else {
+                    pointDiffText = `-${myVote.betPoint}pt`;
+                    statusBadge = '<div style="font-size: 1.5rem; color: var(--danger); font-weight: bold; margin: 0.5rem 0;">❌ 外れ</div>';
+                }
+            } else {
+                statusBadge = '<div style="font-size: 1.2rem; color: var(--text-sub); margin: 0.5rem 0;">未投票</div>';
+            }
+
+            resultSec.innerHTML = `
+                <div style="text-align: center; padding: 0.5rem 0;">
+                    <div style="font-size: 0.9rem; color: var(--text-sub);">🏆 勝者</div>
+                    <div style="font-size: 1.5rem; font-weight: bold; color: var(--primary); margin-bottom: 1rem;">${winnerName}</div>
+
+                    <div style="font-size: 0.85rem; color: var(--text-sub);">あなたの投票</div>
+                    <div style="font-size: 1.1rem; font-weight: bold; margin-bottom: 0.5rem;">${myVotedName}</div>
+
+                    ${statusBadge}
+
+                    <div style="font-size: 1.4rem; font-weight: bold; margin-bottom: 1rem; color: ${isWin ? 'var(--success)' : 'var(--danger)'};">
+                        ${pointDiffText}
+                    </div>
+
+                    <div style="border-top: 1px solid var(--card-border); padding-top: 0.8rem;">
+                        <div style="font-size: 0.85rem; color: var(--text-sub);">所持ポイント</div>
+                        <div class="point-display" style="font-size: 1.8rem;">${viewerPoints} pt</div>
+                    </div>
+
+                    ${renderVoteSummary()}
+                </div>
+            `;
+        }
+    }
+    else {
+        if (voteFormArea) voteFormArea.style.display = 'none';
+        if (resultSec) resultSec.style.display = 'none';
     }
 }
 
