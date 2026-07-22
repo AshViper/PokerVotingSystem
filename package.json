@@ -1,0 +1,20 @@
+{
+  "name": "poker-voting-system",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.6",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.8",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.4"
+  }
+}
