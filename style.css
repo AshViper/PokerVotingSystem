@@ -228,18 +228,6 @@ input:focus {
     background: rgba(99, 102, 241, 0.15);
 }
 
-/* Ranking UI */
-.ranking-list {
-    padding-left: 1.5rem;
-    margin-top: 1rem;
-}
-
-.ranking-list li {
-    font-size: 1.1rem;
-    padding: 0.4rem 0;
-    border-bottom: 1px solid var(--card-border);
-}
-
 /* QR Code */
 #qrcode-container {
     display: flex;
@@ -269,34 +257,4 @@ input:focus {
     color: #fbbf24;
     text-align: center;
     margin: 0.5rem 0;
-}
-
-/* Screen Switcher */
-.screen {
-    display: none;
-}
-
-.screen.active {
-    display: block;
-}
-
-.result-banner {
-    text-align: center;
-    padding: 1rem;
-    border-radius: 8px;
-    font-size: 1.25rem;
-    font-weight: bold;
-    margin-top: 1rem;
-}
-
-.result-win {
-    background: rgba(16, 185, 129, 0.2);
-    color: var(--success);
-    border: 1px solid var(--success);
-}
-
-.result-lose {
-    background: rgba(239, 68, 68, 0.2);
-    color: var(--danger);
-    border: 1px solid var(--danger);
 }

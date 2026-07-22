@@ -6,23 +6,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>リアルタイム対戦・投票システム</title>
   <link rel="stylesheet" href="style.css">
+  <!-- PeerJS & QRCode CDN -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
 </head>
 
 <body>
-
   <div class="container">
-
-    <!-- ==================== TITLE SCREEN ==================== -->
+    <!-- TITLE SCREEN -->
     <div id="screen-title" class="screen active">
       <div class="card" style="text-align: center;">
-        <h1 style="font-size: 1.8rem; margin-bottom: 0.5rem;">🎮 リアルタイム対戦・投票</h1>
-        <p class="subtitle">役割を選択してスタートしてください</p>
-        <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1.5rem;">
-          <button class="btn btn-primary" onclick="goToHost()">👑 Host（大会管理画面）</button>
-          <button class="btn btn-success" onclick="goToPlayer()">🎮 Player（選手として参加）</button>
-          <button class="btn btn-warning" onclick="goToVoteLogin()">🎲 Vote（観戦・投票として参加）</button>
+        <h1>⚔️ Realtime Tournament</h1>
+        <p class="subtitle">役割を選択してください</p>
+        <div class="button-group" style="display: flex; flex-direction: column; gap: 0.75rem;">
+          <button class="btn btn-primary" onclick="goToHost()">ホスト（部屋作成）</button>
+          <button class="btn btn-success" onclick="goToPlayer()">プレイヤー（対戦参加）</button>
+          <button class="btn btn-warning" onclick="goToVoteLogin()">観戦者（投票参加）</button>
         </div>
       </div>
     </div>
@@ -67,47 +66,42 @@
       </div>
     </div>
 
-    <!-- ==================== PLAYER SCREEN ==================== -->
+    <!-- PLAYER SCREEN -->
     <div id="screen-player" class="screen">
       <div class="card">
-        <h1>🎮 Player（選手画面）</h1>
+        <h2>🎮 プレイヤー画面</h2>
         <div id="player-join-form">
           <div class="form-group">
             <label>参加コード</label>
-            <input type="text" id="input-room-code" placeholder="コードを入力" style="text-transform: uppercase;">
+            <input type="text" id="input-room-code" placeholder="例: A1B2C3" style="text-transform: uppercase;">
           </div>
           <div class="form-group">
             <label>プレイヤー名</label>
-            <input type="text" id="input-player-name" placeholder="例: タロウ">
+            <input type="text" id="input-player-name" placeholder="例: 太郎">
           </div>
-          <button class="btn btn-primary" onclick="joinGame()">エントリー</button>
-          <button class="btn btn-secondary" onclick="goToTitle()" style="margin-top: 0.5rem;">タイトルへ戻る</button>
+          <button class="btn btn-primary" onclick="joinGame()">参加する</button>
         </div>
-
-        <div id="player-joined-info" style="display: none; text-align: center;">
-          <div class="badge badge-voting" style="margin-bottom: 1rem;">エントリー完了</div>
-          <h2 id="player-display-name">---</h2>
-          <p class="subtitle">対戦準備中です。画面の案内に従ってプレイしてください。</p>
+        <div id="player-joined-info" style="display:none; text-align: center;">
+          <p class="subtitle">参加中のプレイヤー名</p>
+          <h3 id="player-display-name" style="color: var(--primary); margin-bottom: 1rem;">-</h3>
+          <div id="player-status-message" class="badge badge-waiting">対戦準備中</div>
         </div>
       </div>
     </div>
 
-    <!-- ==================== VOTE LOGIN SCREEN ==================== -->
+    <!-- VOTE LOGIN SCREEN -->
     <div id="screen-vote-login" class="screen">
       <div class="card">
-        <h1>🎲 Vote（観戦・投票に参加）</h1>
-        <p class="subtitle">参加コードを入力して投票画面へ進みます</p>
+        <h2>🗳️ 観戦者参加</h2>
         <div class="form-group">
           <label>参加コード</label>
-          <input type="text" id="input-vote-room-code" placeholder="コードを入力" style="text-transform: uppercase;">
+          <input type="text" id="input-vote-room-code" placeholder="例: A1B2C3" style="text-transform: uppercase;">
         </div>
-        <button class="btn btn-primary" onclick="joinAsVote()">次へ</button>
-        <button class="btn btn-secondary" onclick="goToTitle()" style="margin-top: 0.5rem;">タイトルへ戻る</button>
+        <button class="btn btn-primary" onclick="joinAsVote()">接続する</button>
       </div>
     </div>
 
-    <!-- ==================== VOTE SCREEN ==================== -->
-    <!-- VOTE SCREEN -->
+    <!-- VOTE MAIN SCREEN -->
     <div id="screen-vote" class="screen">
       <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
@@ -140,9 +134,9 @@
           </div>
 
           <!-- 所持ポイント表示 -->
-          <div style="text-align: center; margin-bottom: 1rem;">
+          <div id="vote-points-header" style="text-align: center; margin-bottom: 1rem;">
             <span style="font-size: 0.85rem; color: var(--text-sub);">所持ポイント</span>
-            <div class="point-display"><span id="viewer-points">100</span> pt</div>
+            <div class="point-display"><span id="viewer-points">50</span> pt</div>
           </div>
 
           <!-- マッチ投票フォームエリア -->
@@ -158,14 +152,22 @@
             <button id="btn-submit-vote" class="btn btn-primary" onclick="submitVote()">投票する</button>
           </div>
 
-          <!-- 結果・締切表示エリア -->
+          <!-- 結果・締切・終了表示エリア -->
           <div id="vote-result-section" style="display:none;"></div>
         </div>
       </div>
     </div>
 
+    <!-- HOST RANKING MODAL -->
+    <div id="ranking-modal"
+      style="display:none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); z-index: 1000; padding: 1rem;">
+      <div class="card" style="max-width: 500px; margin: 2rem auto; position: relative;">
+        <h2>🏆 最終結果ランキング</h2>
+        <ol id="ranking-list" class="ranking-list" style="list-style: none; padding: 0; margin-top: 1rem;"></ol>
+        <button class="btn btn-secondary" onclick="closeRanking()" style="margin-top: 1.5rem;">閉じる</button>
+      </div>
+    </div>
   </div>
-
   <script src="app.js"></script>
 </body>
 

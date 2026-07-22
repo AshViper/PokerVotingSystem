@@ -1,9 +1,12 @@
+// 初期ポイント定数
+const INITIAL_POINTS = 50;
+
 let peer = null;
 let hostConnections = new Map();
 let hostConn = null;
 
 let voterName = '';
-let viewerPoints = 100;
+let viewerPoints = INITIAL_POINTS;
 let viewerId = '';
 
 let currentRoundId = null;
@@ -11,8 +14,8 @@ let currentRoundId = null;
 let room = {
     roomCode: '',
     players: [],
-    voters: [],
-    voteState: 'WAITING', // WAITING | PREDICTION | VOTING | CLOSED | ENDED
+    voters: [], // { id, name, points, tournamentPredId }
+    voteState: 'WAITING', // WAITING | PREDICTION | VOTING | CLOSED | ENDED | TOURNAMENT_ENDED
     votes: [], // { viewerId, playerId, betPoint }
     selectedWinnerId: null,
     roundId: null
@@ -104,7 +107,7 @@ window.addEventListener('DOMContentLoaded', () => {
         localStorage.removeItem('viewer_id');
 
         voterName = '';
-        viewerPoints = 100;
+        viewerPoints = INITIAL_POINTS;
         viewerId = 'viewer_' + Math.random().toString(36).substring(2, 9);
         localStorage.setItem('viewer_id', viewerId);
         localStorage.setItem('viewer_points', viewerPoints);
@@ -113,7 +116,7 @@ window.addEventListener('DOMContentLoaded', () => {
     } else {
         viewerId = localStorage.getItem('viewer_id') || 'viewer_' + Math.random().toString(36).substring(2, 9);
         voterName = localStorage.getItem('voter_name') || '';
-        viewerPoints = parseInt(localStorage.getItem('viewer_points')) || 100;
+        viewerPoints = parseInt(localStorage.getItem('viewer_points')) || INITIAL_POINTS;
         localStorage.setItem('viewer_id', viewerId);
 
         showScreen('screen-title');
@@ -167,7 +170,7 @@ function handleHostData(conn, data) {
         case 'REGISTER_VOTER':
             let v = room.voters.find(x => x.id === payload.id);
             if (!v) {
-                room.voters.push({ id: payload.id, name: payload.name, points: 100, tournamentPredId: null });
+                room.voters.push({ id: payload.id, name: payload.name, points: INITIAL_POINTS, tournamentPredId: null });
             } else {
                 v.name = payload.name;
             }
@@ -185,7 +188,7 @@ function handleHostData(conn, data) {
                 if (!room.votes.find(v => v.viewerId === payload.viewerId)) {
                     room.votes.push(payload);
                     let voter = room.voters.find(x => x.id === payload.viewerId);
-                    if (voter) voter.points -= payload.betPoint; // ポイント差し引き
+                    if (voter) voter.points -= payload.betPoint;
                     broadcastState();
                 }
             }
@@ -212,11 +215,13 @@ function generateQRCode(code) {
 }
 
 function startPrediction() {
+    if (room.voteState === 'TOURNAMENT_ENDED') return;
     room.voteState = 'PREDICTION';
     broadcastState();
 }
 
 function startVoting() {
+    if (room.voteState === 'TOURNAMENT_ENDED') return;
     room.votes = [];
     room.selectedWinnerId = null;
     room.voteState = 'VOTING';
@@ -224,21 +229,20 @@ function startVoting() {
     broadcastState();
 }
 
-// 投票締切 (VOTING -> CLOSED)
 function endVoting() {
     if (room.voteState !== 'VOTING') return;
     room.voteState = 'CLOSED';
     broadcastState();
 }
 
-// プレイヤー選択
 function selectWinner(playerId) {
+    if (room.voteState === 'TOURNAMENT_ENDED') return;
     room.selectedWinnerId = playerId;
     broadcastState();
 }
 
-// 勝者決定・ポイント計算 (CLOSED -> ENDED)
 function announceWinner() {
+    if (room.voteState === 'TOURNAMENT_ENDED') return;
     if (room.voteState !== 'CLOSED') {
         return alert('まず「投票締切」を押して投票を締め切ってください。');
     }
@@ -246,7 +250,6 @@ function announceWinner() {
         return alert('左側のプレイヤー一覧から勝者を選択してください。');
     }
 
-    // 的中者に配当加算 (賭けポイントの2倍＝元の賭け分＋獲得分)
     room.votes.forEach(v => {
         if (v.playerId === room.selectedWinnerId) {
             let voter = room.voters.find(x => x.id === v.viewerId);
@@ -260,18 +263,35 @@ function announceWinner() {
     broadcastState();
 }
 
+// ゲーム終了処理
 function endTournament() {
+    room.voteState = 'TOURNAMENT_ENDED';
+    broadcastState();
+    showRankingModal();
+}
+
+function showRankingModal() {
+    // ポイント順に並び替え（同ポイントの場合は配列の順序＝先着順を保持）
     const sorted = [...room.voters].sort((a, b) => b.points - a.points).slice(0, 10);
     const listEl = document.getElementById('ranking-list');
 
     if (listEl) {
         listEl.innerHTML = sorted.length > 0
-            ? sorted.map(v => `<li><strong>${escapeHtml(v.name)}</strong>: ${v.points} pt</li>`).join('')
-            : '<li>参加者がいません</li>';
+            ? sorted.map((v, i) => `
+                <li style="padding: 0.6rem 0; border-bottom: 1px solid var(--card-border); font-size: 1.1rem; display: flex; justify-content: space-between;">
+                    <span><strong>${i + 1}位 ${escapeHtml(v.name)}</strong></span>
+                    <strong style="color: #fbbf24;">${v.points}pt</strong>
+                </li>`).join('')
+            : '<li style="text-align:center; padding:1rem;">参加者がいません</li>';
     }
 
     const modal = document.getElementById('ranking-modal');
     if (modal) modal.style.display = 'block';
+}
+
+function closeRanking() {
+    const modal = document.getElementById('ranking-modal');
+    if (modal) modal.style.display = 'none';
 }
 
 function updateHostUI() {
@@ -303,11 +323,21 @@ function updateHostUI() {
     const startVoteBtn = document.getElementById('btn-start-vote');
     const endVoteBtn = document.getElementById('btn-end-vote');
     const calcBtn = document.getElementById('btn-calc-result');
+    const endTournamentBtn = document.getElementById('btn-end-tournament');
 
-    if (startPredBtn) startPredBtn.disabled = (room.voteState === 'VOTING' || room.voteState === 'CLOSED');
-    if (startVoteBtn) startVoteBtn.disabled = (room.voteState === 'VOTING');
-    if (endVoteBtn) endVoteBtn.disabled = (room.voteState !== 'VOTING');
-    if (calcBtn) calcBtn.disabled = (room.voteState !== 'CLOSED' || !room.selectedWinnerId);
+    if (room.voteState === 'TOURNAMENT_ENDED') {
+        if (startPredBtn) startPredBtn.disabled = true;
+        if (startVoteBtn) startVoteBtn.disabled = true;
+        if (endVoteBtn) endVoteBtn.disabled = true;
+        if (calcBtn) calcBtn.disabled = true;
+        if (endTournamentBtn) endTournamentBtn.disabled = true;
+    } else {
+        if (startPredBtn) startPredBtn.disabled = (room.voteState === 'VOTING' || room.voteState === 'CLOSED');
+        if (startVoteBtn) startVoteBtn.disabled = (room.voteState === 'VOTING');
+        if (endVoteBtn) endVoteBtn.disabled = (room.voteState !== 'VOTING');
+        if (calcBtn) calcBtn.disabled = (room.voteState !== 'CLOSED' || !room.selectedWinnerId);
+        if (endTournamentBtn) endTournamentBtn.disabled = false;
+    }
 }
 
 // ================= クライアント共通 / Player / Vote =================
@@ -329,6 +359,18 @@ function connectToHost(code, { onOpen, onFail } = {}) {
 function handleClientData(data) {
     if (data.type === 'SYNC_STATE') {
         room = data.payload;
+
+        // Player 画面への状態反映
+        const playerStatusMsg = document.getElementById('player-status-message');
+        if (playerStatusMsg) {
+            if (room.voteState === 'TOURNAMENT_ENDED') {
+                playerStatusMsg.className = 'badge badge-ended';
+                playerStatusMsg.innerText = '🏆 大会が終了しました';
+            } else {
+                playerStatusMsg.className = 'badge badge-waiting';
+                playerStatusMsg.innerText = '対戦準備中';
+            }
+        }
 
         // 自分の最新ポイントを更新・同期
         let myVoter = room.voters.find(x => x.id === viewerId);
@@ -401,6 +443,7 @@ function setVoteConnectStatus(text) {
 }
 
 function submitPrediction() {
+    if (room.voteState === 'TOURNAMENT_ENDED') return;
     if (!selectedPredPlayerId) return alert('選手を選択してください。');
 
     const btn = document.getElementById('btn-submit-pred');
@@ -416,12 +459,13 @@ function submitPrediction() {
 }
 
 function selectVotePlayer(id) {
-    if (voteSubmittedLocally) return;
+    if (voteSubmittedLocally || room.voteState === 'TOURNAMENT_ENDED') return;
     selectedVotePlayerId = id;
     updateVoteUI();
 }
 
 function selectPredPlayer(id) {
+    if (room.voteState === 'TOURNAMENT_ENDED') return;
     selectedPredPlayerId = id;
     updateVoteUI();
 }
@@ -446,7 +490,6 @@ function submitVote() {
     updateVoteUI();
 }
 
-// 投票結果集計HTML生成
 function renderVoteSummary() {
     if (!room.players || room.players.length === 0) return '';
 
@@ -470,14 +513,68 @@ function renderVoteSummary() {
     return html;
 }
 
+function renderTournamentEndedUI() {
+    // ポイント降順（同ポイントなら登録順維持）
+    const sortedVoters = [...room.voters].sort((a, b) => b.points - a.points);
+    const myRankIndex = sortedVoters.findIndex(v => v.id === viewerId);
+    const myRankText = myRankIndex !== -1 ? `${myRankIndex + 1}位` : '圏外';
+    const championText = sortedVoters.length > 0 ? escapeHtml(sortedVoters[0].name) : 'なし';
+
+    const top10 = sortedVoters.slice(0, 10);
+    const rankingItemsHtml = top10.length > 0
+        ? top10.map((v, i) => `
+            <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--card-border); display: flex; justify-content: space-between;">
+                <span><strong>${i + 1}位 ${escapeHtml(v.name)}</strong></span>
+                <strong style="color: #fbbf24;">${v.points}pt</strong>
+            </li>`).join('')
+        : '<li style="text-align:center; padding:0.5rem;">参加者がいません</li>';
+
+    return `
+        <div style="text-align: center; padding: 0.5rem 0;">
+            <h2 style="color: #fbbf24; margin-bottom: 1rem;">🏆 大会終了</h2>
+            
+            <div style="background: rgba(15, 23, 42, 0.6); padding: 1.2rem; border-radius: 12px; border: 1px solid var(--card-border); margin-bottom: 1.5rem;">
+                <div style="font-size: 0.85rem; color: var(--text-sub);">あなたの順位</div>
+                <div style="font-size: 2.2rem; font-weight: 800; color: var(--success); margin: 0.2rem 0;">${myRankText}</div>
+                
+                <div style="font-size: 0.85rem; color: var(--text-sub); margin-top: 0.8rem;">ポイント</div>
+                <div class="point-display" style="font-size: 1.8rem; margin: 0.2rem 0;">${viewerPoints} pt</div>
+                
+                <div style="font-size: 0.85rem; color: var(--text-sub); margin-top: 0.8rem;">優勝</div>
+                <div style="font-size: 1.4rem; font-weight: bold; color: #fbbf24;">${championText}</div>
+            </div>
+
+            <h3 style="margin-bottom: 0.8rem;">🏆 TOP10 ランキング</h3>
+            <ol style="text-align: left; list-style: none; padding: 0.5rem 1rem; background: rgba(15, 23, 42, 0.4); border-radius: 8px; border: 1px solid var(--card-border);">
+                ${rankingItemsHtml}
+            </ol>
+        </div>
+    `;
+}
+
 function updateVoteUI() {
     const badge = document.getElementById('vote-state-badge');
     if (badge) badge.innerText = room.voteState;
 
+    const pointsHeader = document.getElementById('vote-points-header');
     const voteFormArea = document.getElementById('vote-form-area');
     const resultSec = document.getElementById('vote-result-section');
-
     const predSec = document.getElementById('prediction-section');
+
+    // 大会終了状態 (TOURNAMENT_ENDED)
+    if (room.voteState === 'TOURNAMENT_ENDED') {
+        if (pointsHeader) pointsHeader.style.display = 'none';
+        if (voteFormArea) voteFormArea.style.display = 'none';
+        if (predSec) predSec.style.display = 'none';
+        if (resultSec) {
+            resultSec.style.display = 'block';
+            resultSec.innerHTML = renderTournamentEndedUI();
+        }
+        return;
+    }
+
+    if (pointsHeader) pointsHeader.style.display = 'block';
+
     if (predSec) {
         predSec.style.display = room.voteState === 'PREDICTION' ? 'block' : 'none';
         if (room.voteState === 'PREDICTION') {
@@ -492,7 +589,6 @@ function updateVoteUI() {
         }
     }
 
-    // 1. VOTING 状態
     if (room.voteState === 'VOTING') {
         if (voteFormArea) voteFormArea.style.display = 'block';
         if (resultSec) resultSec.style.display = 'none';
@@ -512,7 +608,6 @@ function updateVoteUI() {
             submitBtn.innerText = voteSubmittedLocally ? '投票済み' : '投票する';
         }
     }
-    // 2. CLOSED (締切) 状態
     else if (room.voteState === 'CLOSED') {
         if (voteFormArea) voteFormArea.style.display = 'none';
         if (resultSec) {
@@ -526,7 +621,6 @@ function updateVoteUI() {
             `;
         }
     }
-    // 3. ENDED (結果発表) 状態
     else if (room.voteState === 'ENDED') {
         if (voteFormArea) voteFormArea.style.display = 'none';
         if (resultSec) {
