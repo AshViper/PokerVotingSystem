@@ -1,15 +1,13 @@
 // ==========================================
 // データ構造 & 状態管理 (State)
 // ==========================================
-const CHANNEL_NAME = 'realtime_game_channel';
-const broadcast = new BroadcastChannel(CHANNEL_NAME);
+// ルームごとにChannelを動的生成できるようにlet化
+let broadcast = null;
 
-// LocalStorage Point & Viewer ID
 let viewerPoints = parseInt(localStorage.getItem('viewer_points')) || 50;
 let viewerId = localStorage.getItem('viewer_id') || 'viewer_' + Math.random().toString(36).substring(2, 9);
 localStorage.setItem('viewer_id', viewerId);
 
-// Global State
 let room = {
     roomCode: '',
     players: [],
@@ -21,8 +19,75 @@ let room = {
 let selectedVotePlayerId = null;
 let hasVotedThisRound = false;
 
+// BroadcastChannel の初期化・接続関数
+function initBroadcastChannel(roomCode) {
+    if (broadcast) {
+        broadcast.close();
+    }
+
+    // ルームコードごとの独立したチャンネル名を作成
+    const channelName = `realtime_game_${roomCode}`;
+    broadcast = new BroadcastChannel(channelName);
+
+    broadcast.onmessage = (event) => {
+        const { type, payload } = event.data;
+
+        switch (type) {
+            case 'SYNC_STATE':
+                room = payload;
+                updateHostUI();
+                updateVoteUI();
+                break;
+
+            case 'REQUEST_SYNC':
+                // 新規参加者(Vote等)が接続してきた際にHostが現在の状態を再送信
+                if (room.roomCode) {
+                    syncState();
+                }
+                break;
+
+            case 'PLAYER_JOINED':
+                if (!room.players.find(p => p.id === payload.id)) {
+                    room.players.push(payload);
+                    syncState();
+                }
+                break;
+
+            case 'SUBMIT_VOTE':
+                if (!room.votes.find(v => v.viewerId === payload.viewerId)) {
+                    room.votes.push(payload);
+                    syncState();
+                }
+                break;
+
+            case 'CALCULATE_RESULTS':
+                room.selectedWinnerId = payload.winnerId;
+                room.voteState = 'ENDED';
+                processVoteResult(payload.winnerId);
+                syncState();
+                break;
+
+            case 'RESET_ROUND':
+                room.votes = [];
+                room.voteState = 'WAITING';
+                room.selectedWinnerId = null;
+                hasVotedThisRound = false;
+                syncState();
+                break;
+        }
+    };
+}
+
+function syncState() {
+    updateHostUI();
+    updateVoteUI();
+    if (broadcast) {
+        broadcast.postMessage({ type: 'SYNC_STATE', payload: room });
+    }
+}
+
 // ==========================================
-// 画面遷移制御
+// 画面遷移 & 初期化
 // ==========================================
 function showScreen(screenId) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -42,72 +107,29 @@ function goToPlayer() {
     showScreen('screen-player');
 }
 
-// 初期化（URLクエリパラメータの判定）
+// 起動時のURLクエリパラメータ判定
 window.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
     const role = params.get('role');
     const code = params.get('room');
 
-    // QRコードからのアクセス (?role=vote) の場合のみ Vote 画面へ遷移
+    // QRコードアクセス (role=vote & roomが存在) の場合
     if (role === 'vote' && code) {
-        room.roomCode = code;
+        room.roomCode = code.toUpperCase();
+        initBroadcastChannel(room.roomCode);
+
+        document.getElementById('vote-room-code-display').innerText = room.roomCode;
         showScreen('screen-vote');
         updateViewerPoints(0);
+
+        // Hostに最新のRoom状態を要求
+        setTimeout(() => {
+            if (broadcast) broadcast.postMessage({ type: 'REQUEST_SYNC' });
+        }, 300);
     } else {
-        // それ以外はすべてタイトル画面へ
         showScreen('screen-title');
     }
 });
-
-// ==========================================
-// リアルタイム通信 Engine
-// ==========================================
-broadcast.onmessage = (event) => {
-    const { type, payload } = event.data;
-
-    switch (type) {
-        case 'SYNC_STATE':
-            room = payload;
-            updateHostUI();
-            updateVoteUI();
-            break;
-
-        case 'PLAYER_JOINED':
-            if (!room.players.find(p => p.id === payload.id)) {
-                room.players.push(payload);
-                syncState();
-            }
-            break;
-
-        case 'SUBMIT_VOTE':
-            if (!room.votes.find(v => v.viewerId === payload.viewerId)) {
-                room.votes.push(payload);
-                syncState();
-            }
-            break;
-
-        case 'CALCULATE_RESULTS':
-            room.selectedWinnerId = payload.winnerId;
-            room.voteState = 'ENDED';
-            processVoteResult(payload.winnerId);
-            syncState();
-            break;
-
-        case 'RESET_ROUND':
-            room.votes = [];
-            room.voteState = 'WAITING';
-            room.selectedWinnerId = null;
-            hasVotedThisRound = false;
-            syncState();
-            break;
-    }
-};
-
-function syncState() {
-    updateHostUI();
-    updateVoteUI();
-    broadcast.postMessage({ type: 'SYNC_STATE', payload: room });
-}
 
 // ==========================================
 // 【Host画面】処理ロジック
@@ -116,6 +138,7 @@ function initHost() {
     if (!room.roomCode) {
         room.roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         document.getElementById('host-room-code').innerText = room.roomCode;
+        initBroadcastChannel(room.roomCode);
         generateQRCode(room.roomCode);
     }
 }
@@ -124,7 +147,6 @@ function generateQRCode(code) {
     const qrContainer = document.getElementById('qrcode');
     qrContainer.innerHTML = '';
 
-    // URLに role=vote を付与してアクセス限定化
     const voteUrl = `${window.location.origin}${window.location.pathname}?role=vote&room=${code}`;
     new QRCode(qrContainer, {
         text: voteUrl,
@@ -227,10 +249,8 @@ function joinGame() {
         return;
     }
 
-    if (room.roomCode && codeInput !== room.roomCode) {
-        alert('参加コードが存在しません。');
-        return;
-    }
+    room.roomCode = codeInput;
+    initBroadcastChannel(room.roomCode);
 
     const player = {
         id: 'player_' + Math.random().toString(36).substring(2, 9),
@@ -242,10 +262,11 @@ function joinGame() {
     document.getElementById('player-display-name').innerText = nameInput;
 
     broadcast.postMessage({ type: 'PLAYER_JOINED', payload: player });
+    broadcast.postMessage({ type: 'REQUEST_SYNC' });
 }
 
 // ==========================================
-// 【Vote画面】処理ロジック (QR専用)
+// 【Vote画面】処理ロジック
 // ==========================================
 function updateViewerPoints(delta) {
     viewerPoints += delta;
