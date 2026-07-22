@@ -1,69 +1,49 @@
-// ==========================================
-// PeerJS を使った P2P リアルタイム通信
-// ==========================================
-// Host が Peer サーバー役（PeerID = 参加コード）となり、
-// Player / Vote の各クライアントは Host に直接 connect する
-// 「スター型」構成にする（Host を中心にした P2P）。
-// Room の状態は Host が唯一の正（Single Source of Truth）として保持し、
-// 変化があるたびに接続中の全クライアントへ SYNC_STATE を配信する。
-// ※ Host のタブ/ブラウザが閉じるとセッションは終了する（Hostが常時オンラインである前提）。
+let peer = null;
+let hostConnections = new Map();
+let hostConn = null;
 
-let peer = null;                    // 自分自身の Peer インスタンス
-let hostConnections = new Map();    // [Hostのみ] peerId -> DataConnection
-let hostConn = null;                // [Player/Voteのみ] Hostへの接続
-
-let viewerPoints = parseInt(localStorage.getItem('viewer_points')) || 50;
+let voterName = localStorage.getItem('voter_name') || '';
+let viewerPoints = parseInt(localStorage.getItem('viewer_points')) || 100;
 let viewerId = localStorage.getItem('viewer_id') || 'viewer_' + Math.random().toString(36).substring(2, 9);
 localStorage.setItem('viewer_id', viewerId);
 
 let room = {
     roomCode: '',
     players: [],
-    voteState: 'WAITING', // WAITING | VOTING | ENDED
+    voters: [], // { id, name, points, tournamentPredId }
+    voteState: 'WAITING', // WAITING | PREDICTION | VOTING | ENDED
     votes: [],
     selectedWinnerId: null
 };
 
 let selectedVotePlayerId = null;
-let voteSubmittedLocally = false; // 送信直後～SYNC_STATE反映までの二重送信ロック
-let lastShownWinnerId = null;     // 同じ結果を二重表示しないためのガード
+let selectedPredPlayerId = null;
+let voteSubmittedLocally = false;
+let lastShownWinnerId = null;
 
-// PeerJSのPeerIDは記号制限があるため、参加コードから安全なIDを作る
 function makePeerId(code) {
     return 'rtgame-' + code.toLowerCase();
 }
 
 function destroyPeer() {
     if (peer) {
-        try { peer.destroy(); } catch (e) { /* noop */ }
+        try { peer.destroy(); } catch (e) { }
     }
     peer = null;
     hostConn = null;
     hostConnections.clear();
 }
 
-// ==========================================
-// 画面遷移 & 初期化
-// ==========================================
 function showScreen(screenId) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(screenId).classList.add('active');
 }
 
-function goToTitle() {
-    showScreen('screen-title');
-}
+function goToTitle() { showScreen('screen-title'); }
+function goToHost() { initHost(); showScreen('screen-host'); }
+function goToPlayer() { showScreen('screen-player'); }
 
-function goToHost() {
-    initHost();
-    showScreen('screen-host');
-}
-
-function goToPlayer() {
-    showScreen('screen-player');
-}
-
-// 起動時のURLクエリパラメータ判定（QRコードアクセス）
+// QRコードでのアクセス判定
 window.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
     const role = params.get('role');
@@ -74,16 +54,22 @@ window.addEventListener('DOMContentLoaded', () => {
         room.roomCode = roomCode;
         document.getElementById('vote-room-code-display').innerText = roomCode;
         showScreen('screen-vote');
-        updateViewerPoints(0);
-        setVoteConnectStatus('Hostに接続中...');
 
+        if (voterName) {
+            document.getElementById('vote-name-form').style.display = 'none';
+            document.getElementById('vote-main-section').style.display = 'block';
+            document.getElementById('display-voter-name').innerText = voterName;
+        }
+
+        setVoteConnectStatus('Hostに接続中...');
         connectToHost(roomCode, {
             onOpen: () => {
                 setVoteConnectStatus('');
-                hostConn.send({ type: 'REQUEST_SYNC' });
+                if (voterName) sendVoterRegister();
+                else hostConn.send({ type: 'REQUEST_SYNC' });
             },
             onFail: () => {
-                setVoteConnectStatus('⚠ 接続に失敗しました。参加コードを確認し、再読み込みしてください。');
+                setVoteConnectStatus('⚠ 接続失敗。再読み込みしてください。');
             }
         });
     } else {
@@ -91,11 +77,9 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// ==========================================
-// 【Host】PeerJS セットアップ
-// ==========================================
+// ================= Host ロジック =================
 function initHost() {
-    if (peer) return; // 既に初期化済み
+    if (peer) return;
 
     const code = Math.random().toString(36).substring(2, 8).toUpperCase();
     room.roomCode = code;
@@ -112,31 +96,13 @@ function initHost() {
     peer.on('connection', (conn) => {
         conn.on('open', () => {
             hostConnections.set(conn.peer, conn);
-            // 接続直後に最新状態を送っておく
             conn.send({ type: 'SYNC_STATE', payload: room });
         });
         conn.on('data', (data) => handleHostData(conn, data));
-        conn.on('close', () => {
-            hostConnections.delete(conn.peer);
-        });
+        conn.on('close', () => hostConnections.delete(conn.peer));
     });
 
-    peer.on('disconnected', () => {
-        setHostPeerStatus('再接続中...');
-        peer.reconnect();
-    });
-
-    peer.on('error', (err) => {
-        console.error('[Host Peer Error]', err);
-        if (err.type === 'unavailable-id') {
-            // 稀にIDが衝突した場合は作り直す
-            destroyPeer();
-            initHost();
-        } else {
-            setHostPeerStatus('⚠ 接続エラーが発生しました (' + err.type + ')');
-        }
-    });
-
+    peer.on('disconnected', () => peer.reconnect());
     updateHostUI();
 }
 
@@ -155,20 +121,38 @@ function handleHostData(conn, data) {
             broadcastState();
             break;
 
-        case 'REQUEST_SYNC':
-            conn.send({ type: 'SYNC_STATE', payload: room });
+        case 'REGISTER_VOTER':
+            let v = room.voters.find(x => x.id === payload.id);
+            if (!v) {
+                room.voters.push({ id: payload.id, name: payload.name, points: 100, tournamentPredId: null });
+            } else {
+                v.name = payload.name;
+            }
+            broadcastState();
+            break;
+
+        case 'SUBMIT_PREDICTION':
+            let voterP = room.voters.find(x => x.id === payload.viewerId);
+            if (voterP) voterP.tournamentPredId = payload.predPlayerId;
+            broadcastState();
             break;
 
         case 'SUBMIT_VOTE':
             if (room.voteState === 'VOTING' && !room.votes.find(v => v.viewerId === payload.viewerId)) {
                 room.votes.push(payload);
+                // ポイント一時控除
+                let voter = room.voters.find(x => x.id === payload.viewerId);
+                if (voter) voter.points -= payload.betPoint;
                 broadcastState();
             }
+            break;
+
+        case 'REQUEST_SYNC':
+            conn.send({ type: 'SYNC_STATE', payload: room });
             break;
     }
 }
 
-// Hostの状態を全クライアントへ配信 + 自画面も更新
 function broadcastState() {
     updateHostUI();
     hostConnections.forEach(conn => {
@@ -179,21 +163,17 @@ function broadcastState() {
 function generateQRCode(code) {
     const qrContainer = document.getElementById('qrcode');
     qrContainer.innerHTML = '';
-
     const voteUrl = `${window.location.origin}${window.location.pathname}?role=vote&room=${code}`;
-    new QRCode(qrContainer, {
-        text: voteUrl,
-        width: 140,
-        height: 140
-    });
+    new QRCode(qrContainer, { text: voteUrl, width: 140, height: 140 });
 }
 
-// ==========================================
-// 【Host】投票コントロール
-// ==========================================
+function startPrediction() {
+    room.voteState = 'PREDICTION';
+    broadcastState();
+}
+
 function startVoting() {
     if (room.voteState === 'ENDED') {
-        // 新ラウンド：投票データのみリセット（観戦者ポイントは各自のLocalStorageのまま維持）
         room.votes = [];
         room.selectedWinnerId = null;
     }
@@ -213,8 +193,33 @@ function selectWinner(playerId) {
 
 function announceWinner() {
     if (!room.selectedWinnerId) return;
+
+    // マッチ的中者に配当を計算 (2倍計算の例)
+    room.votes.forEach(v => {
+        if (v.playerId === room.selectedWinnerId) {
+            let voter = room.voters.find(x => x.id === v.viewerId);
+            if (voter) voter.points += v.betPoint * 2;
+        }
+    });
+
     room.voteState = 'ENDED';
     broadcastState();
+}
+
+// 大会終了（上位10名計算）
+function endTournament() {
+    const sorted = [...room.voters].sort((a, b) => b.points - a.points).slice(0, 10);
+    const listEl = document.getElementById('ranking-list');
+
+    listEl.innerHTML = sorted.length > 0
+        ? sorted.map(v => `<li><strong>${escapeHtml(v.name)}</strong>: ${v.points} pt</li>`).join('')
+        : '<li>参加者がいません</li>';
+
+    document.getElementById('ranking-modal').style.display = 'block';
+}
+
+function closeRanking() {
+    document.getElementById('ranking-modal').style.display = 'none';
 }
 
 function updateHostUI() {
@@ -229,30 +234,19 @@ function updateHostUI() {
             listContainer.innerHTML = room.players.map(p => {
                 const isSelected = room.selectedWinnerId === p.id;
                 return `
-          <div class="list-item selectable-item ${isSelected ? 'active' : ''}" onclick="selectWinner('${p.id}')">
-            <span><strong>${escapeHtml(p.name)}</strong></span>
-            ${isSelected ? '<span class="badge badge-voting">勝者選択中</span>' : ''}
-          </div>
-        `;
+                  <div class="list-item selectable-item ${isSelected ? 'active' : ''}" onclick="selectWinner('${p.id}')">
+                    <span><strong>${escapeHtml(p.name)}</strong></span>
+                    ${isSelected ? '<span class="badge badge-voting">勝者選択中</span>' : ''}
+                  </div>`;
             }).join('');
         }
     }
 
     const badge = document.getElementById('host-state-badge');
     if (badge) {
-        if (room.voteState === 'WAITING') {
-            badge.className = 'badge badge-waiting';
-            badge.innerText = '状態: 待機中';
-        } else if (room.voteState === 'VOTING') {
-            badge.className = 'badge badge-voting';
-            badge.innerText = '状態: 投票中';
-        } else {
-            badge.className = 'badge badge-ended';
-            badge.innerText = '状態: 投票終了';
-        }
+        badge.innerText = '状態: ' + room.voteState;
     }
 
-    // ボタンの活性状態は room.voteState から一元的に導出する
     const startBtn = document.getElementById('btn-start-vote');
     const endBtn = document.getElementById('btn-end-vote');
     if (startBtn) startBtn.disabled = room.voteState === 'VOTING';
@@ -264,56 +258,36 @@ function updateHostUI() {
     if (calcBtn) calcBtn.disabled = !room.selectedWinnerId || room.voteState !== 'ENDED';
 }
 
-// ==========================================
-// 【クライアント共通】Hostへの接続
-// ==========================================
+// ================= クライアント共通 / Player / Vote =================
 function connectToHost(code, { onOpen, onFail } = {}) {
     destroyPeer();
     peer = new Peer();
 
     peer.on('open', () => {
         hostConn = peer.connect(makePeerId(code), { reliable: true });
-
-        hostConn.on('open', () => {
-            if (onOpen) onOpen();
-        });
-
-        hostConn.on('data', (data) => {
-            handleClientData(data);
-        });
-
-        hostConn.on('close', () => {
-            alert('Hostとの接続が切れました。ページを再読み込みしてください。');
-        });
+        hostConn.on('open', () => { if (onOpen) onOpen(); });
+        hostConn.on('data', (data) => handleClientData(data));
     });
 
     peer.on('error', (err) => {
-        console.error('[Client Peer Error]', err);
-        if (err.type === 'peer-unavailable') {
-            if (onFail) onFail();
-            else alert('参加コードが見つかりません。');
-        } else if (onFail) {
-            onFail();
-        }
+        if (onFail) onFail();
     });
 }
 
 function handleClientData(data) {
-    const { type, payload } = data;
-    if (type === 'SYNC_STATE') {
+    if (data.type === 'SYNC_STATE') {
         const prevState = room.voteState;
-        room = payload;
+        room = data.payload;
 
-        // 新ラウンド判定：Hostから実際に状態を受信した時だけ判定する
-        // （ローカルのUI操作でupdateVoteUIを呼んだ時には発火させない）
-        const isFreshRoundStart =
-            room.voteState === 'VOTING' &&
-            room.votes.length === 0 &&
-            (prevState === 'ENDED' || prevState === 'WAITING');
+        // 自分のポイント更新
+        let myVoter = room.voters.find(x => x.id === viewerId);
+        if (myVoter) {
+            viewerPoints = myVoter.points;
+            updateViewerPoints(0);
+        }
 
-        if (isFreshRoundStart) {
+        if (room.voteState === 'VOTING' && room.votes.length === 0 && (prevState === 'ENDED' || prevState === 'WAITING')) {
             voteSubmittedLocally = false;
-            lastShownWinnerId = null;
             selectedVotePlayerId = null;
             const banner = document.getElementById('vote-result-banner');
             if (banner) banner.innerHTML = '';
@@ -323,180 +297,120 @@ function handleClientData(data) {
     }
 }
 
-// ==========================================
-// 【Player画面】処理ロジック
-// ==========================================
 function joinGame() {
     const codeInput = document.getElementById('input-room-code').value.trim().toUpperCase();
     const nameInput = document.getElementById('input-player-name').value.trim();
 
-    if (!codeInput || !nameInput) {
-        alert('参加コードとプレイヤー名を入力してください。');
-        return;
-    }
+    if (!codeInput || !nameInput) return alert('入力してください。');
 
-    const joinBtn = document.querySelector('#player-join-form .btn-primary');
-    if (joinBtn) { joinBtn.disabled = true; joinBtn.innerText = '接続中...'; }
-
-    const player = {
-        id: 'player_' + Math.random().toString(36).substring(2, 9),
-        name: nameInput
-    };
+    const player = { id: 'player_' + Math.random().toString(36).substring(2, 9), name: nameInput };
 
     connectToHost(codeInput, {
         onOpen: () => {
-            room.roomCode = codeInput;
             hostConn.send({ type: 'JOIN_PLAYER', payload: player });
-
             document.getElementById('player-join-form').style.display = 'none';
             document.getElementById('player-joined-info').style.display = 'block';
             document.getElementById('player-display-name').innerText = nameInput;
-        },
-        onFail: () => {
-            alert('参加コードが見つかりません。コードを確認してください。');
-            if (joinBtn) { joinBtn.disabled = false; joinBtn.innerText = 'ゲームに参加する'; }
         }
     });
 }
 
-// ==========================================
-// 【Vote画面】処理ロジック
-// ==========================================
-function setVoteConnectStatus(text) {
-    const el = document.getElementById('vote-connect-status');
-    if (el) el.innerText = text;
+// Vote 名前登録
+function registerVoter() {
+    const name = document.getElementById('input-voter-name').value.trim();
+    if (!name) return alert('名前を入力してください。');
+
+    voterName = name;
+    localStorage.setItem('voter_name', voterName);
+
+    document.getElementById('vote-name-form').style.display = 'none';
+    document.getElementById('vote-main-section').style.display = 'block';
+    document.getElementById('display-voter-name').innerText = voterName;
+
+    sendVoterRegister();
+}
+
+function sendVoterRegister() {
+    if (hostConn && hostConn.open) {
+        hostConn.send({
+            type: 'REGISTER_VOTER',
+            payload: { id: viewerId, name: voterName }
+        });
+    }
 }
 
 function updateViewerPoints(delta) {
     viewerPoints += delta;
-    localStorage.setItem('viewer_points', viewerPoints);
     const ptElem = document.getElementById('viewer-points');
     if (ptElem) ptElem.innerText = viewerPoints;
 }
 
-function hasVotedThisRound() {
-    return room.votes.some(v => v.viewerId === viewerId) || voteSubmittedLocally;
+function submitPrediction() {
+    if (!selectedPredPlayerId) return alert('選手を選択してください。');
+    hostConn.send({
+        type: 'SUBMIT_PREDICTION',
+        payload: { viewerId, predPlayerId: selectedPredPlayerId }
+    });
+    alert('大会優勝予想を送信しました！');
+    document.getElementById('prediction-section').style.display = 'none';
 }
 
-function selectVotePlayer(playerId) {
-    if (room.voteState !== 'VOTING' || hasVotedThisRound()) return;
-    selectedVotePlayerId = playerId;
+function selectVotePlayer(id) {
+    selectedVotePlayerId = id;
+    updateVoteUI();
+}
+
+function selectPredPlayer(id) {
+    selectedPredPlayerId = id;
     updateVoteUI();
 }
 
 function submitVote() {
     const betInput = parseInt(document.getElementById('input-bet-point').value);
+    if (!selectedVotePlayerId || isNaN(betInput) || betInput > viewerPoints) return alert('正しい内容を選択・入力してください。');
 
-    if (room.voteState !== 'VOTING') {
-        alert('投票できません（受付時間外）');
-        return;
-    }
-
-    if (hasVotedThisRound()) {
-        alert('同ラウンドでは再投票できません。');
-        return;
-    }
-
-    if (isNaN(betInput) || betInput <= 0) {
-        alert('正しいポイントを入力してください。');
-        return;
-    }
-
-    if (betInput > viewerPoints) {
-        alert('ポイント不足です。');
-        return;
-    }
-
-    if (!selectedVotePlayerId) {
-        alert('投票先プレイヤーを選択してください。');
-        return;
-    }
-
-    if (!hostConn || !hostConn.open) {
-        alert('Hostとの接続がありません。ページを再読み込みしてください。');
-        return;
-    }
-
-    updateViewerPoints(-betInput);
     voteSubmittedLocally = true;
-
-    const voteData = {
-        viewerId: viewerId,
-        playerId: selectedVotePlayerId,
-        betPoint: betInput
-    };
-
-    hostConn.send({ type: 'SUBMIT_VOTE', payload: voteData });
+    hostConn.send({
+        type: 'SUBMIT_VOTE',
+        payload: { viewerId, playerId: selectedVotePlayerId, betPoint: betInput }
+    });
     updateVoteUI();
-}
-
-function processVoteResult(winnerId) {
-    const myVote = room.votes.find(v => v.viewerId === viewerId);
-    const banner = document.getElementById('vote-result-banner');
-    if (!banner || !myVote) return;
-
-    if (myVote.playerId === winnerId) {
-        const reward = myVote.betPoint * 2;
-        updateViewerPoints(reward);
-        banner.innerHTML = `<div class="result-banner result-win">🎉 的中！ +${reward}pt 獲得！</div>`;
-    } else {
-        banner.innerHTML = `<div class="result-banner result-lose">💀 ハズレ (${myVote.betPoint}pt 没収)</div>`;
-    }
 }
 
 function updateVoteUI() {
     const badge = document.getElementById('vote-state-badge');
     const submitBtn = document.getElementById('btn-submit-vote');
+    const predSec = document.getElementById('prediction-section');
 
-    const voted = hasVotedThisRound();
+    if (badge) badge.innerText = room.voteState;
 
-    if (badge) {
-        if (room.voteState === 'WAITING') {
-            badge.className = 'badge badge-waiting';
-            badge.innerText = '待機中';
-            if (submitBtn) submitBtn.disabled = true;
-        } else if (room.voteState === 'VOTING') {
-            badge.className = 'badge badge-voting';
-            badge.innerText = '投票受付中';
-            if (submitBtn) submitBtn.disabled = voted || !selectedVotePlayerId;
-        } else {
-            badge.className = 'badge badge-ended';
-            badge.innerText = '投票受付終了';
-            if (submitBtn) submitBtn.disabled = true;
+    if (predSec) {
+        predSec.style.display = room.voteState === 'PREDICTION' ? 'block' : 'none';
+        const predList = document.getElementById('pred-player-list');
+        if (predList && room.players.length > 0) {
+            predList.innerHTML = room.players.map(p => `
+                <div class="list-item selectable-item ${selectedPredPlayerId === p.id ? 'active' : ''}" onclick="selectPredPlayer('${p.id}')">
+                    <span>${escapeHtml(p.name)}</span>
+                </div>
+            `).join('');
         }
-    }
-
-    if (submitBtn) {
-        submitBtn.innerText = voted ? '投票済み' : '投票する';
     }
 
     const voteList = document.getElementById('vote-player-list');
-    if (voteList) {
-        if (room.players.length === 0) {
-            voteList.innerHTML = '<p class="subtitle">プレイヤーがまだいません</p>';
-        } else {
-            voteList.innerHTML = room.players.map(p => {
-                const isSelected = selectedVotePlayerId === p.id;
-                return `
-          <div class="list-item selectable-item ${isSelected ? 'active' : ''}" onclick="selectVotePlayer('${p.id}')">
-            <span><strong>${escapeHtml(p.name)}</strong></span>
-            ${isSelected ? '<span class="badge badge-voting">選択中</span>' : ''}
-          </div>
-        `;
-            }).join('');
-        }
+    if (voteList && room.players.length > 0) {
+        voteList.innerHTML = room.players.map(p => `
+            <div class="list-item selectable-item ${selectedVotePlayerId === p.id ? 'active' : ''}" onclick="selectVotePlayer('${p.id}')">
+                <span>${escapeHtml(p.name)}</span>
+            </div>
+        `).join('');
     }
 
-    // 勝者発表の結果表示（同じ結果を二重表示しない）
-    if (room.voteState === 'ENDED' && room.selectedWinnerId && lastShownWinnerId !== room.selectedWinnerId) {
-        lastShownWinnerId = room.selectedWinnerId;
-        processVoteResult(room.selectedWinnerId);
+    if (submitBtn) {
+        submitBtn.disabled = room.voteState !== 'VOTING' || voteSubmittedLocally;
+        submitBtn.innerText = voteSubmittedLocally ? '投票済み' : '投票する';
     }
 }
 
-// XSS防止
 function escapeHtml(str) {
-    return str.replace(/[&<>"']/g, (m) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
-    })[m]);
+    return str.replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[m]);
 }

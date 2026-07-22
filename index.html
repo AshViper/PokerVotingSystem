@@ -5,14 +5,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>リアルタイム対戦・投票システム</title>
-
-  <!-- CSSファイルの読み込み -->
   <link rel="stylesheet" href="style.css">
-
-  <!-- QRコード生成ライブラリ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-
-  <!-- PeerJS（P2P通信ライブラリ） -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
 </head>
 
@@ -20,63 +14,84 @@
 
   <div class="container">
 
-    <!-- ==================== TITLE SCREEN ==================== -->
+    <!-- TITLE SCREEN -->
     <div id="screen-title" class="screen active">
       <div class="card" style="text-align: center;">
-        <h1 style="font-size: 1.8rem; margin-bottom: 0.5rem;">🎮 リアルタイム対戦</h1>
+        <h1 style="font-size: 1.8rem; margin-bottom: 0.5rem;">🎮 リアルタイム対戦・投票</h1>
         <p class="subtitle">役割を選択してスタートしてください</p>
-
         <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1.5rem;">
-          <button class="btn btn-primary" onclick="goToHost()">👑 Host（部屋を作る）</button>
-          <button class="btn btn-success" onclick="goToPlayer()">🎮 Join（プレイヤーとして参加）</button>
+          <button class="btn btn-primary" onclick="goToHost()">👑 Host（大会管理画面）</button>
+          <button class="btn btn-success" onclick="goToPlayer()">🎮 Player（選手として参加）</button>
         </div>
       </div>
     </div>
 
-    <!-- ==================== HOST SCREEN ==================== -->
-    <div id="screen-host" class="screen">
-      <div class="card">
-        <h1>👑 Host（ゲーム管理）</h1>
-        <div style="text-align: center; margin-bottom: 1rem;">
-          <span id="host-state-badge" class="badge badge-waiting">状態: 待機中</span>
+    <!-- HOST SCREEN (PC用 左右2分割) -->
+    <div id="screen-host" class="screen screen-host-layout">
+
+      <!-- 左側：プレイヤーリスト ＆ 大会優勝者決定 -->
+      <div class="host-left">
+        <div class="card">
+          <h2>👥 参加プレイヤー (<span id="player-count">0</span>)</h2>
+          <div id="host-player-list">
+            <p class="subtitle">プレイヤーの参加を待っています...</p>
+          </div>
+
+          <div id="winner-select-section" style="margin-top: 1.5rem; display: none;">
+            <h3>🏆 マッチ勝者選択</h3>
+            <button id="btn-calc-result" class="btn btn-success" onclick="announceWinner()"
+              disabled>勝者決定・ポイント計算</button>
+          </div>
+
+          <div id="tournament-end-section"
+            style="margin-top: 2rem; border-top: 1px solid var(--card-border); padding-top: 1rem;">
+            <h3>🏁 大会管理</h3>
+            <button class="btn btn-warning" onclick="endTournament()">ゲーム終了（上位10名出力）</button>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label>参加コード</label>
-          <div id="host-room-code" class="room-code-display">------</div>
-        </div>
-
-        <p id="host-peer-status" class="subtitle" style="margin-bottom: 1rem;">Peer初期化中...</p>
-
-        <div id="qrcode-container">
-          <div id="qrcode"></div>
-          <span class="qr-caption">📱 スマホで読み込んで投票画面へ</span>
-        </div>
-
-        <button id="btn-start-vote" class="btn btn-primary" onclick="startVoting()">▶ 投票開始</button>
-        <button id="btn-end-vote" class="btn btn-danger" onclick="endVoting()" disabled>⏹ 投票終了</button>
-      </div>
-
-      <div class="card">
-        <h2>参加プレイヤー (<span id="player-count">0</span>)</h2>
-        <div id="host-player-list">
-          <p class="subtitle">プレイヤーの参加を待っています...</p>
-        </div>
-
-        <div id="winner-select-section" style="margin-top: 1.5rem; display: none;">
-          <h3>🏆 勝者選択</h3>
-          <p class="subtitle">勝者を選択して集計を行ってください</p>
-          <button id="btn-calc-result" class="btn btn-success" onclick="announceWinner()" disabled>勝者決定・ポイント分配</button>
+        <!-- 結果ダイアログ / 上位10名表示 -->
+        <div id="ranking-modal" class="card" style="display: none;">
+          <h2>🏆 大会最終結果 TOP 10 🏆</h2>
+          <ol id="ranking-list" class="ranking-list"></ol>
+          <button class="btn btn-secondary" onclick="closeRanking()" style="margin-top: 1rem;">閉じる</button>
         </div>
       </div>
+
+      <!-- 右側：情報、操作ボタン、QRコード -->
+      <div class="host-right">
+        <div class="card">
+          <h1>👑 Host Controls</h1>
+          <div style="text-align: center; margin-bottom: 1rem;">
+            <span id="host-state-badge" class="badge badge-waiting">状態: 待機中</span>
+          </div>
+
+          <div class="form-group">
+            <label>大会参加コード</label>
+            <div id="host-room-code" class="room-code-display">------</div>
+          </div>
+
+          <p id="host-peer-status" class="subtitle" style="margin-bottom: 1rem;">Peer初期化中...</p>
+
+          <div id="qrcode-container">
+            <div id="qrcode"></div>
+            <span class="qr-caption">📱 スマホでQRを読み込んで投票参加</span>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem;">
+            <button id="btn-start-prediction" class="btn btn-primary" onclick="startPrediction()">1. 大会優勝予想 開始</button>
+            <button id="btn-start-vote" class="btn btn-primary" onclick="startVoting()">2. マッチ投票 開始</button>
+            <button id="btn-end-vote" class="btn btn-danger" onclick="endVoting()" disabled>3. 投票 締め切り</button>
+          </div>
+        </div>
+      </div>
+
     </div>
 
-    <!-- ==================== PLAYER SCREEN ==================== -->
+    <!-- PLAYER SCREEN -->
     <div id="screen-player" class="screen">
       <div class="card">
-        <h1>🎮 Player（参加画面）</h1>
-        <p class="subtitle">参加コードと名前を入力してゲームに参加します</p>
-
+        <h1>🎮 Player（選手画面）</h1>
         <div id="player-join-form">
           <div class="form-group">
             <label>参加コード</label>
@@ -86,50 +101,77 @@
             <label>プレイヤー名</label>
             <input type="text" id="input-player-name" placeholder="例: タロウ">
           </div>
-          <button class="btn btn-primary" onclick="joinGame()">ゲームに参加する</button>
+          <button class="btn btn-primary" onclick="joinGame()">エントリー</button>
           <button class="btn btn-secondary" onclick="goToTitle()" style="margin-top: 0.5rem;">タイトルへ戻る</button>
         </div>
 
         <div id="player-joined-info" style="display: none; text-align: center;">
-          <div class="badge badge-voting" style="margin-bottom: 1rem;">参加中</div>
+          <div class="badge badge-voting" style="margin-bottom: 1rem;">エントリー完了</div>
           <h2 id="player-display-name">---</h2>
-          <p class="subtitle">ホストの進行を待っています。<br>ゲームプレイに集中してください！</p>
+          <p class="subtitle">対戦準備中です。画面の案内に従ってプレイしてください。</p>
         </div>
       </div>
     </div>
 
-    <!-- ==================== VOTE SCREEN ==================== -->
+    <!-- VOTE SCREEN (QRアクセス対応) -->
     <div id="screen-vote" class="screen">
       <div class="card">
-        <h1>🎲 Vote（観戦・投票）</h1>
+        <h1>🎲 Vote（予想・投票）</h1>
         <p class="subtitle">ルーム: <strong id="vote-room-code-display">------</strong></p>
         <p id="vote-connect-status" class="subtitle">接続中...</p>
 
-        <div class="point-display"><span id="viewer-points">50</span> <span style="font-size: 1rem;">pt</span></div>
-
-        <div id="vote-status-msg" style="text-align: center; margin-bottom: 1rem;">
-          <span id="vote-state-badge" class="badge badge-waiting">待機中</span>
+        <!-- 名前未登録時の入力フォーム -->
+        <div id="vote-name-form">
+          <div class="form-group">
+            <label>あなたの名前（投票者名）</label>
+            <input type="text" id="input-voter-name" placeholder="例: ハンター">
+          </div>
+          <button class="btn btn-success" onclick="registerVoter()">投票に参加する</button>
         </div>
 
-        <div class="form-group">
-          <label>賭けポイント</label>
-          <input type="number" id="input-bet-point" min="1" value="10">
+        <!-- 登録後の投票メイン画面 -->
+        <div id="vote-main-section" style="display: none;">
+          <div style="text-align: center; margin-bottom: 0.5rem;">
+            参加名: <strong id="display-voter-name">---</strong>
+          </div>
+          <div class="point-display"><span id="viewer-points">100</span> <span style="font-size: 1rem;">pt</span></div>
+
+          <div id="vote-status-msg" style="text-align: center; margin-bottom: 1rem;">
+            <span id="vote-state-badge" class="badge badge-waiting">待機中</span>
+          </div>
+
+          <!-- 大会優勝予想 -->
+          <div id="prediction-section"
+            style="display: none; border: 1px dashed var(--primary); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+            <h3>🏆 大会優勝予想</h3>
+            <p class="subtitle">最初に大会全体の優勝者を予想してください</p>
+            <div id="pred-player-list"></div>
+            <button id="btn-submit-pred" class="btn btn-primary" onclick="submitPrediction()"
+              style="margin-top: 0.5rem;">優勝予想を送信</button>
+          </div>
+
+          <!-- マッチ毎の賭け投票 -->
+          <div id="match-vote-section">
+            <div class="form-group">
+              <label>賭けポイント</label>
+              <input type="number" id="input-bet-point" min="1" value="10">
+            </div>
+
+            <label>勝敗予想プレイヤーを選択</label>
+            <div id="vote-player-list" style="margin-bottom: 1rem;">
+              <p class="subtitle">プレイヤーを読み込んでいます...</p>
+            </div>
+
+            <button id="btn-submit-vote" class="btn btn-primary" onclick="submitVote()" disabled>投票する</button>
+          </div>
+
+          <div id="vote-result-banner"></div>
         </div>
-
-        <label>投票先プレイヤーを選択</label>
-        <div id="vote-player-list" style="margin-bottom: 1rem;">
-          <p class="subtitle">プレイヤーがまだいません</p>
-        </div>
-
-        <button id="btn-submit-vote" class="btn btn-primary" onclick="submitVote()" disabled>投票する</button>
-
-        <div id="vote-result-banner"></div>
       </div>
     </div>
 
   </div>
 
-  <!-- JavaScriptファイルの読み込み -->
   <script src="app.js"></script>
 </body>
 

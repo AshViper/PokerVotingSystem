@@ -33,10 +33,11 @@ body {
 
 .container {
     width: 100%;
-    max-width: 480px;
+    max-width: 1200px;
+    /* Host画面分割用に広幅へ拡張 */
 }
 
-/* Modern Card UI */
+/* Card UI */
 .card {
     background: var(--card-bg);
     backdrop-filter: blur(12px);
@@ -60,6 +61,31 @@ h3 {
     font-size: 0.875rem;
     text-align: center;
     margin-bottom: 1.5rem;
+}
+
+/* Host Screen 2分割レイアウト */
+.screen-host-layout {
+    display: none;
+    gap: 1.5rem;
+    width: 100%;
+}
+
+.screen-host-layout.active {
+    display: flex;
+    flex-direction: row;
+}
+
+.host-left,
+.host-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+@media (max-width: 768px) {
+    .screen-host-layout.active {
+        flex-direction: column;
+    }
 }
 
 /* Form & Input */
@@ -135,6 +161,11 @@ input:focus {
     color: #fff;
 }
 
+.btn-warning {
+    background: var(--warning);
+    color: #fff;
+}
+
 .btn-secondary {
     background: var(--secondary);
     color: #fff;
@@ -193,7 +224,19 @@ input:focus {
     background: rgba(99, 102, 241, 0.15);
 }
 
-/* QR Code Style */
+/* Ranking UI */
+.ranking-list {
+    padding-left: 1.5rem;
+    margin-top: 1rem;
+}
+
+.ranking-list li {
+    font-size: 1.1rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--card-border);
+}
+
+/* QR Code */
 #qrcode-container {
     display: flex;
     flex-direction: column;
@@ -240,7 +283,6 @@ input:focus {
     font-size: 1.25rem;
     font-weight: bold;
     margin-top: 1rem;
-    animation: pop 0.3s ease-out;
 }
 
 .result-win {
@@ -253,16 +295,4 @@ input:focus {
     background: rgba(239, 68, 68, 0.2);
     color: var(--danger);
     border: 1px solid var(--danger);
-}
-
-@keyframes pop {
-    0% {
-        transform: scale(0.9);
-        opacity: 0;
-    }
-
-    100% {
-        transform: scale(1);
-        opacity: 1;
-    }
 }
