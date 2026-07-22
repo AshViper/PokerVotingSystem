@@ -2,10 +2,9 @@ let peer = null;
 let hostConnections = new Map();
 let hostConn = null;
 
-let voterName = localStorage.getItem('voter_name') || '';
-let viewerPoints = parseInt(localStorage.getItem('viewer_points')) || 100;
-let viewerId = localStorage.getItem('viewer_id') || 'viewer_' + Math.random().toString(36).substring(2, 9);
-localStorage.setItem('viewer_id', viewerId);
+let voterName = '';
+let viewerPoints = 100;
+let viewerId = '';
 
 let room = {
     roomCode: '',
@@ -19,7 +18,6 @@ let room = {
 let selectedVotePlayerId = null;
 let selectedPredPlayerId = null;
 let voteSubmittedLocally = false;
-let lastShownWinnerId = null;
 
 function makePeerId(code) {
     return 'rtgame-' + code.toLowerCase();
@@ -44,7 +42,7 @@ function goToHost() { initHost(); showScreen('screen-host'); }
 function goToPlayer() { showScreen('screen-player'); }
 function goToVoteLogin() { showScreen('screen-vote-login'); }
 
-// ================= Vote 接続の共通処理 =================
+// ================= Vote 接続処理 =================
 function initVoteClient(code) {
     const roomCode = code.toUpperCase();
     room.roomCode = roomCode;
@@ -62,7 +60,6 @@ function initVoteClient(code) {
 
     setVoteConnectStatus('Hostに接続中...');
 
-    // 接続完了までボタンを無効化し、空送信を防ぐ
     const btn = document.getElementById('btn-register-voter');
     if (btn) {
         btn.disabled = true;
@@ -81,27 +78,42 @@ function initVoteClient(code) {
         },
         onFail: () => {
             setVoteConnectStatus('⚠ 接続失敗。参加コードを確認してください。');
-            if (btn) { btn.innerText = '接続エラー'; }
+            if (btn) btn.innerText = '接続エラー';
         }
     });
 }
 
-// PC(ブラウザ)からVoteに参加する処理
 function joinAsVote() {
     const code = document.getElementById('input-vote-room-code').value.trim();
     if (!code) return alert('参加コードを入力してください。');
     initVoteClient(code);
 }
 
-// QRコードでのアクセス判定
+// 起動時: QRコードアクセス（role=vote）なら前回のキャッシュを消去して新規アクセス扱いにする
 window.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
     const role = params.get('role');
     const code = params.get('room');
 
     if (role === 'vote' && code) {
+        // 前回の参加者データをクリア
+        localStorage.removeItem('voter_name');
+        localStorage.removeItem('viewer_points');
+        localStorage.removeItem('viewer_id');
+
+        voterName = '';
+        viewerPoints = 100;
+        viewerId = 'viewer_' + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem('viewer_id', viewerId);
+        localStorage.setItem('viewer_points', viewerPoints);
+
         initVoteClient(code);
     } else {
+        viewerId = localStorage.getItem('viewer_id') || 'viewer_' + Math.random().toString(36).substring(2, 9);
+        voterName = localStorage.getItem('voter_name') || '';
+        viewerPoints = parseInt(localStorage.getItem('viewer_points')) || 100;
+        localStorage.setItem('viewer_id', viewerId);
+
         showScreen('screen-title');
     }
 });
@@ -167,12 +179,14 @@ function handleHostData(conn, data) {
             break;
 
         case 'SUBMIT_VOTE':
-            if (room.voteState === 'VOTING' && !room.votes.find(v => v.viewerId === payload.viewerId)) {
-                room.votes.push(payload);
-                // ポイント一時控除
-                let voter = room.voters.find(x => x.id === payload.viewerId);
-                if (voter) voter.points -= payload.betPoint;
-                broadcastState();
+            if (room.voteState === 'VOTING') {
+                // 重複投票ガード
+                if (!room.votes.find(v => v.viewerId === payload.viewerId)) {
+                    room.votes.push(payload);
+                    let voter = room.voters.find(x => x.id === payload.viewerId);
+                    if (voter) voter.points -= payload.betPoint;
+                    broadcastState();
+                }
             }
             break;
 
@@ -223,7 +237,6 @@ function selectWinner(playerId) {
 function announceWinner() {
     if (!room.selectedWinnerId) return;
 
-    // マッチ的中者に配当を計算 (2倍計算の例)
     room.votes.forEach(v => {
         if (v.playerId === room.selectedWinnerId) {
             let voter = room.voters.find(x => x.id === v.viewerId);
@@ -235,7 +248,6 @@ function announceWinner() {
     broadcastState();
 }
 
-// 大会終了（上位10名計算）
 function endTournament() {
     const sorted = [...room.voters].sort((a, b) => b.points - a.points).slice(0, 10);
     const listEl = document.getElementById('ranking-list');
@@ -308,7 +320,6 @@ function handleClientData(data) {
         const prevState = room.voteState;
         room = data.payload;
 
-        // 自分のポイント更新
         let myVoter = room.voters.find(x => x.id === viewerId);
         if (myVoter) {
             viewerPoints = myVoter.points;
@@ -344,10 +355,14 @@ function joinGame() {
     });
 }
 
-// Vote 名前登録
+// Vote 名前登録 (連打・重複送信防止付き)
 function registerVoter() {
-    const name = document.getElementById('input-voter-name').value.trim();
+    const nameInput = document.getElementById('input-voter-name');
+    const name = nameInput ? nameInput.value.trim() : '';
     if (!name) return alert('名前を入力してください。');
+
+    const btn = document.getElementById('btn-register-voter');
+    if (btn) btn.disabled = true; // 連打防止
 
     voterName = name;
     localStorage.setItem('voter_name', voterName);
@@ -379,8 +394,14 @@ function updateViewerPoints(delta) {
     if (ptElem) ptElem.innerText = viewerPoints;
 }
 
+// 優勝予想送信 (連打・重複送信防止付き)
 function submitPrediction() {
     if (!selectedPredPlayerId) return alert('選手を選択してください。');
+
+    const btn = document.getElementById('btn-submit-pred');
+    if (btn && btn.disabled) return;
+    if (btn) btn.disabled = true;
+
     hostConn.send({
         type: 'SUBMIT_PREDICTION',
         payload: { viewerId, predPlayerId: selectedPredPlayerId }
@@ -399,11 +420,22 @@ function selectPredPlayer(id) {
     updateVoteUI();
 }
 
+// 賭け投票送信 (連打・重複送信防止付き)
 function submitVote() {
+    if (voteSubmittedLocally) return;
+
     const betInput = parseInt(document.getElementById('input-bet-point').value);
-    if (!selectedVotePlayerId || isNaN(betInput) || betInput > viewerPoints) return alert('正しい内容を選択・入力してください。');
+    if (!selectedVotePlayerId || isNaN(betInput) || betInput <= 0 || betInput > viewerPoints) {
+        return alert('正しい内容を選択・入力してください。');
+    }
 
     voteSubmittedLocally = true;
+    const submitBtn = document.getElementById('btn-submit-vote');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = '投票済み';
+    }
+
     hostConn.send({
         type: 'SUBMIT_VOTE',
         payload: { viewerId, playerId: selectedVotePlayerId, betPoint: betInput }
