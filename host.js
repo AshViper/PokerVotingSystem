@@ -33,11 +33,11 @@ function generateRoomCode() {
 }
 function buildViewerUrl(roomCode) {
   try {
-    var viewerUrl = new URL('viewer.html', window.location.href);
+    var viewerUrl = new URL('voter.html', window.location.href);
     viewerUrl.searchParams.set('room', roomCode);
     return viewerUrl.toString();
   } catch (e) {
-    return 'viewer.html?room=' + encodeURIComponent(roomCode);
+    return 'voter.html?room=' + encodeURIComponent(roomCode);
   }
 }
 function getHostPeerId(roomCode) { return 'poker-' + roomCode; }
@@ -407,7 +407,8 @@ HostPeer.prototype.handleJoin = function (remoteId, packet) {
     this.broadcastRanking();
   } else if (packet.role === 'viewer') {
     this.viewers[remoteId] = true;
-    this.tournament.addParticipant(remoteId, '(viewer)');
+    var viewerName = (packet.name && packet.name.trim()) ? packet.name.trim() : 'Viewer';
+    this.tournament.addParticipant(remoteId, viewerName);
     this.hostCallbacks.onViewerJoined(remoteId);
     this.sendPlayerList(remoteId);
     this.sendTo(remoteId, createTournamentStatePacket(this.tournament.getState()));
@@ -540,7 +541,13 @@ HostUI.prototype.render = function () {
     '      <div id="host-room-code" class="code">---</div>',
     '    </div>',
     '  </div>',
-    '  <div class="qr-area" id="host-qr"></div>',
+    '  <div class="card" style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1.25rem;">',
+    '    <div style="flex: 1; min-width: 200px;">',
+    '      <h2 style="font-size: 1.1rem; margin-bottom: 0.25rem;">📱 Scan to Vote</h2>',
+    '      <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.4; margin-bottom: 0;">Scan this QR code to join the voting booth and place predictions.</p>',
+    '    </div>',
+    '    <div class="qr-area" id="host-qr" style="margin: 0; padding: 0.4rem; background: #fff; border-radius: var(--radius-md);"></div>',
+    '  </div>',
     '  <div class="card">',
     '    <div class="card-header">',
     '      <div class="section-label">👥 Participants (<span id="participant-count">0</span>)</div>',
@@ -603,14 +610,14 @@ HostUI.prototype.updateMatchArea = function (tournament, host) {
   var el = this.matchAreaEl;
   if (st.status === 'idle') {
     el.innerHTML = '<div class="empty-state"><div class="icon">🚀</div><p>Ready! Start the tournament when players are ready.</p></div>' +
-      '<button id="btn-start" class="btn btn-primary btn-block btn-lg" style="margin-top:0.5rem">Start Tournament</button>';
+      '<button id="btn-start" class="btn btn-primary btn-block btn-lg" style="margin-top:0.5rem">🎮 大会開始 (Start Tournament)</button>';
     var b = document.getElementById('btn-start');
     if (b) b.addEventListener('click', function () { host.tournament.openChampionshipPredict(); host.broadcastTournamentState(); self.updateMatchArea(tournament, host); });
     return;
   }
   if (st.champPredictOpen) {
     el.innerHTML = '<div class="status status-info">📢 Championship predictions are open</div>' +
-      '<button id="btn-close" class="btn btn-primary btn-block" style="margin-top:0.5rem">Close Predictions</button>';
+      '<button id="btn-close" class="btn btn-primary btn-block" style="margin-top:0.5rem">🔒 予想締切 (Close Predictions)</button>';
     var b = document.getElementById('btn-close');
     if (b) b.addEventListener('click', function () { host.tournament.closeChampionshipPredict(); host.broadcastTournamentState(); host.broadcastRanking(); self.updateMatchArea(tournament, host); self.updateRanking(tournament); });
     return;
@@ -625,10 +632,10 @@ HostUI.prototype.updateMatchArea = function (tournament, host) {
   for (var i = 0; i < st.matches.length; i++) { if (st.matches[i].winner === null) { am = st.matches[i]; ai = i; break; } }
   if (!am) {
     el.innerHTML = '<div class="status status-info">All matches complete.</div>' +
-      '<button id="btn-finish" class="btn btn-primary btn-block" style="margin-top:0.5rem">Finish Tournament</button>';
+      '<button id="btn-finish" class="btn btn-primary btn-block" style="margin-top:0.5rem">🏁 大会終了 (Finish Tournament)</button>';
     var b = document.getElementById('btn-finish');
     if (b) b.addEventListener('click', function () {
-      var id = prompt('Tournament winner Player ID:');
+      var id = prompt('大会の優勝者ID（Player ID）を入力してください:');
       if (id) { host.tournament.setTournamentWinner(id); host.broadcastTournamentState(); host.broadcastRanking(); self.updateMatchArea(tournament, host); self.updateRanking(tournament); }
     });
     return;
@@ -637,18 +644,18 @@ HostUI.prototype.updateMatchArea = function (tournament, host) {
   var p2 = tournament.getPlayerName(am.player2Id);
   var html = '<div class="matchup"><span class="name">' + HostUI.escapeHtml(p1) + '</span><span class="vs">VS</span><span class="name">' + HostUI.escapeHtml(p2) + '</span></div>';
   html += '<div class="control-group">';
-  html += '<button id="btn-vote-toggle" class="btn ' + (am.votingOpen ? 'btn-red' : 'btn-green') + '">' + (am.votingOpen ? '🔴 Close Voting' : '🟢 Open Voting') + '</button>';
+  html += '<button id="btn-vote-toggle" class="btn ' + (am.votingOpen ? 'btn-red' : 'btn-green') + '">' + (am.votingOpen ? '🔴 投票終了 (Close Voting)' : '🟢 投票開始 (Open Voting)') + '</button>';
   html += '</div>';
   html += '<div class="winner-group">';
   html += '<select id="sel-winner">';
-  html += '<option value="">— Select Winner —</option>';
+  html += '<option value="">— 勝者を選択 —</option>';
   html += '<option value="' + am.player1Id + '">' + HostUI.escapeHtml(p1) + '</option>';
   html += '<option value="' + am.player2Id + '">' + HostUI.escapeHtml(p2) + '</option>';
   html += '</select>';
-  html += '<button id="btn-winner" class="btn btn-primary">Register Winner</button>';
+  html += '<button id="btn-winner" class="btn btn-primary">🏆 勝者を発表 (Register Winner)</button>';
   html += '</div>';
   var sum = tournament.getMatchBetSummary(am.id);
-  html += '<div class="bet-stats"><span>' + HostUI.escapeHtml(p1) + ': <strong>' + sum.player1.count + '</strong> bets (' + sum.player1.totalPoints + 'P)</span><span>' + HostUI.escapeHtml(p2) + ': <strong>' + sum.player2.count + '</strong> bets (' + sum.player2.totalPoints + 'P)</span></div>';
+  html += '<div class="bet-stats"><span>' + HostUI.escapeHtml(p1) + ': <strong>' + sum.player1.count + '</strong>票 (' + sum.player1.totalPoints + 'P)</span><span>' + HostUI.escapeHtml(p2) + ': <strong>' + sum.player2.count + '</strong>票 (' + sum.player2.totalPoints + 'P)</span></div>';
   html += '<div class="match-progress">Match ' + (ai + 1) + ' / ' + st.matches.length + '</div>';
   el.innerHTML = html;
 
@@ -702,7 +709,15 @@ function startHost() {
         ui.updateParticipants(host.tournament);
         ui.updateRanking(host.tournament);
       },
-      onPlayerJoined: function (_player) {
+      onPlayerJoined: function (player) {
+        var exists = false;
+        for (var i = 0; i < host.tournament.matchPlayers.length; i++) {
+          if (host.tournament.matchPlayers[i].id === player.peerId) { exists = true; break; }
+        }
+        if (!exists) {
+          host.tournament.matchPlayers.push({ id: player.peerId, name: player.name });
+          ui.updateSetupSelects(host.tournament);
+        }
         ui.updateParticipants(host.tournament);
         ui.updateRanking(host.tournament);
       },

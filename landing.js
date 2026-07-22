@@ -6,13 +6,13 @@ var app = document.getElementById('app');
 // ランディング画面のHTMLを生成
 app.innerHTML = [
   '<div class="landing">',
-  '  <h1>P2P Voting System</h1>',
-  '  <button id="btn-create-room">Create Room</button>',
-  '  <hr />',
-  '  <h2>Join as Player</h2>',
-  '  <input type="text" id="landing-room-code" placeholder="Room Code" maxlength="6" autocomplete="off" />',
-  '  <input type="text" id="landing-player-name" placeholder="Your Name" autocomplete="off" />',
-  '  <button id="btn-join-player">Join</button>',
+  '  <h1>P2P 投票システム</h1>',
+  '  <button id="btn-create-room" class="btn btn-primary btn-block btn-lg">司会者としてルーム作成</button>',
+  '  <hr style="width: 100%; max-width: 320px;" />',
+  '  <h2>プレイヤーとして参加</h2>',
+  '  <input type="text" id="landing-room-code" placeholder="参加コード (6文字)" maxlength="6" autocomplete="off" />',
+  '  <input type="text" id="landing-player-name" placeholder="あなたの名前" autocomplete="off" />',
+  '  <button id="btn-join-player" class="btn btn-green btn-block">参加する</button>',
   '</div>'
 ].join('');
 
