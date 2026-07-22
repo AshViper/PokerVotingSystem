@@ -42,6 +42,56 @@ function showScreen(screenId) {
 function goToTitle() { showScreen('screen-title'); }
 function goToHost() { initHost(); showScreen('screen-host'); }
 function goToPlayer() { showScreen('screen-player'); }
+function goToVoteLogin() { showScreen('screen-vote-login'); }
+
+// ================= Vote 接続の共通処理 =================
+function initVoteClient(code) {
+    const roomCode = code.toUpperCase();
+    room.roomCode = roomCode;
+    document.getElementById('vote-room-code-display').innerText = roomCode;
+    showScreen('screen-vote');
+
+    if (voterName) {
+        document.getElementById('vote-name-form').style.display = 'none';
+        document.getElementById('vote-main-section').style.display = 'block';
+        document.getElementById('display-voter-name').innerText = voterName;
+    } else {
+        document.getElementById('vote-name-form').style.display = 'block';
+        document.getElementById('vote-main-section').style.display = 'none';
+    }
+
+    setVoteConnectStatus('Hostに接続中...');
+
+    // 接続完了までボタンを無効化し、空送信を防ぐ
+    const btn = document.getElementById('btn-register-voter');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'ホストに接続中...';
+    }
+
+    connectToHost(roomCode, {
+        onOpen: () => {
+            setVoteConnectStatus('');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = '投票に参加する';
+            }
+            if (voterName) sendVoterRegister();
+            else hostConn.send({ type: 'REQUEST_SYNC' });
+        },
+        onFail: () => {
+            setVoteConnectStatus('⚠ 接続失敗。参加コードを確認してください。');
+            if (btn) { btn.innerText = '接続エラー'; }
+        }
+    });
+}
+
+// PC(ブラウザ)からVoteに参加する処理
+function joinAsVote() {
+    const code = document.getElementById('input-vote-room-code').value.trim();
+    if (!code) return alert('参加コードを入力してください。');
+    initVoteClient(code);
+}
 
 // QRコードでのアクセス判定
 window.addEventListener('DOMContentLoaded', () => {
@@ -50,28 +100,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const code = params.get('room');
 
     if (role === 'vote' && code) {
-        const roomCode = code.toUpperCase();
-        room.roomCode = roomCode;
-        document.getElementById('vote-room-code-display').innerText = roomCode;
-        showScreen('screen-vote');
-
-        if (voterName) {
-            document.getElementById('vote-name-form').style.display = 'none';
-            document.getElementById('vote-main-section').style.display = 'block';
-            document.getElementById('display-voter-name').innerText = voterName;
-        }
-
-        setVoteConnectStatus('Hostに接続中...');
-        connectToHost(roomCode, {
-            onOpen: () => {
-                setVoteConnectStatus('');
-                if (voterName) sendVoterRegister();
-                else hostConn.send({ type: 'REQUEST_SYNC' });
-            },
-            onFail: () => {
-                setVoteConnectStatus('⚠ 接続失敗。再読み込みしてください。');
-            }
-        });
+        initVoteClient(code);
     } else {
         showScreen('screen-title');
     }
@@ -337,6 +366,11 @@ function sendVoterRegister() {
             payload: { id: viewerId, name: voterName }
         });
     }
+}
+
+function setVoteConnectStatus(text) {
+    const el = document.getElementById('vote-connect-status');
+    if (el) el.innerText = text;
 }
 
 function updateViewerPoints(delta) {

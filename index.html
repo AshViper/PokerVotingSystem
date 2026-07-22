@@ -14,7 +14,7 @@
 
   <div class="container">
 
-    <!-- TITLE SCREEN -->
+    <!-- ==================== TITLE SCREEN ==================== -->
     <div id="screen-title" class="screen active">
       <div class="card" style="text-align: center;">
         <h1 style="font-size: 1.8rem; margin-bottom: 0.5rem;">🎮 リアルタイム対戦・投票</h1>
@@ -22,13 +22,13 @@
         <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 1.5rem;">
           <button class="btn btn-primary" onclick="goToHost()">👑 Host（大会管理画面）</button>
           <button class="btn btn-success" onclick="goToPlayer()">🎮 Player（選手として参加）</button>
+          <button class="btn btn-warning" onclick="goToVoteLogin()">🎲 Vote（観戦・投票として参加）</button>
         </div>
       </div>
     </div>
 
-    <!-- HOST SCREEN (PC用 左右2分割) -->
+    <!-- ==================== HOST SCREEN ==================== -->
     <div id="screen-host" class="screen screen-host-layout">
-
       <!-- 左側：プレイヤーリスト ＆ 大会優勝者決定 -->
       <div class="host-left">
         <div class="card">
@@ -85,10 +85,9 @@
           </div>
         </div>
       </div>
-
     </div>
 
-    <!-- PLAYER SCREEN -->
+    <!-- ==================== PLAYER SCREEN ==================== -->
     <div id="screen-player" class="screen">
       <div class="card">
         <h1>🎮 Player（選手画面）</h1>
@@ -113,7 +112,21 @@
       </div>
     </div>
 
-    <!-- VOTE SCREEN (QRアクセス対応) -->
+    <!-- ==================== VOTE LOGIN SCREEN ==================== -->
+    <div id="screen-vote-login" class="screen">
+      <div class="card">
+        <h1>🎲 Vote（観戦・投票に参加）</h1>
+        <p class="subtitle">参加コードを入力して投票画面へ進みます</p>
+        <div class="form-group">
+          <label>参加コード</label>
+          <input type="text" id="input-vote-room-code" placeholder="コードを入力" style="text-transform: uppercase;">
+        </div>
+        <button class="btn btn-primary" onclick="joinAsVote()">次へ</button>
+        <button class="btn btn-secondary" onclick="goToTitle()" style="margin-top: 0.5rem;">タイトルへ戻る</button>
+      </div>
+    </div>
+
+    <!-- ==================== VOTE SCREEN ==================== -->
     <div id="screen-vote" class="screen">
       <div class="card">
         <h1>🎲 Vote（予想・投票）</h1>
@@ -126,7 +139,8 @@
             <label>あなたの名前（投票者名）</label>
             <input type="text" id="input-voter-name" placeholder="例: ハンター">
           </div>
-          <button class="btn btn-success" onclick="registerVoter()">投票に参加する</button>
+          <!-- IDを追加し、初期状態を disabled にする -->
+          <button id="btn-register-voter" class="btn btn-success" onclick="registerVoter()" disabled>ホストに接続中...</button>
         </div>
 
         <!-- 登録後の投票メイン画面 -->
