@@ -319,6 +319,26 @@ function selectWinner(playerId) {
   broadcastState();
 }
 
+// プレイヤー一覧の「除外」ボタン: 負けた（脱落した）プレイヤーを参加者一覧から取り除く。
+// 除外後は以降の優勝予想・マッチ投票の選手リストに表示されなくなる。
+// 過去の投票・優勝予想（votes / voters の tournamentPredId）は履歴として残す（削除しない）。
+function excludePlayer(playerId) {
+  if (room.voteState === "TOURNAMENT_ENDED") return;
+
+  const target = room.players.find((p) => p.id === playerId);
+  if (!target) return;
+  if (!confirm(`「${target.name}」をプレイヤー一覧から除外しますか？`)) return;
+
+  room.players = room.players.filter((p) => p.id !== playerId);
+
+  // 除外したプレイヤーが勝者候補として選択中だった場合は選択を解除する
+  if (room.selectedWinnerId === playerId) {
+    room.selectedWinnerId = null;
+  }
+
+  broadcastState();
+}
+
 // 「勝者決定・ポイント計算」ボタン: 勝者を確定し、的中した観戦者にポイントを付与する
 function announceWinner() {
   if (room.voteState === "TOURNAMENT_ENDED") return;
@@ -389,7 +409,7 @@ function updateHostUI() {
   const countSpan = document.getElementById("player-count");
   if (countSpan) countSpan.innerText = room.players.length;
 
-  // 参加プレイヤー一覧を描画（タップで勝者候補として選択できる）
+  // 参加プレイヤー一覧を描画（タップで勝者候補として選択、除外ボタンでリストから除外できる）
   if (listContainer) {
     if (room.players.length === 0) {
       listContainer.innerHTML =
@@ -398,10 +418,22 @@ function updateHostUI() {
       listContainer.innerHTML = room.players
         .map((p) => {
           const isSelected = room.selectedWinnerId === p.id;
+          const excludeBtnHtml =
+            room.voteState === "TOURNAMENT_ENDED"
+              ? ""
+              : `<button
+                        type="button"
+                        class="btn btn-danger"
+                        style="width:auto; padding:0.3rem 0.6rem; font-size:0.75rem;"
+                        onclick="event.stopPropagation(); excludePlayer('${p.id}')"
+                      >除外</button>`;
           return `
                   <div class="list-item selectable-item ${isSelected ? "active" : ""}" onclick="selectWinner('${p.id}')">
                     <span><strong>${escapeHtml(p.name)}</strong></span>
-                    ${isSelected ? '<span class="badge badge-success">勝者選択中</span>' : ""}
+                    <span style="display:flex; align-items:center; gap:0.5rem;">
+                      ${isSelected ? '<span class="badge badge-success">勝者選択中</span>' : ""}
+                      ${excludeBtnHtml}
+                    </span>
                   </div>`;
         })
         .join("");
