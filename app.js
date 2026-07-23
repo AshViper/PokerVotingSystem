@@ -244,10 +244,14 @@ function handleHostData(conn, data) {
       break;
 
     // 大会優勝予想を送信してきたとき
+    // 大会優勝予想を送信してきたとき（優勝予想受付中(PREDICTION)のときだけ受け付ける。
+    // 「大会優勝予想終了」で締め切った後に届いた予想は無視する）
     case "SUBMIT_PREDICTION":
-      let voterP = room.voters.find((x) => x.id === payload.viewerId);
-      if (voterP) voterP.tournamentPredId = payload.predPlayerId;
-      broadcastState();
+      if (room.voteState === "PREDICTION") {
+        let voterP = room.voters.find((x) => x.id === payload.viewerId);
+        if (voterP) voterP.tournamentPredId = payload.predPlayerId;
+        broadcastState();
+      }
       break;
 
     // マッチ投票を送信してきたとき
@@ -292,6 +296,16 @@ function generateQRCode(code) {
 function startPrediction() {
   if (room.voteState === "TOURNAMENT_ENDED") return; // 大会終了後は操作不可
   room.voteState = "PREDICTION";
+  broadcastState();
+}
+
+// 「大会優勝予想終了」ボタン: 優勝予想の受付を締め切り、WAITING状態に戻す。
+// これにより observer 画面の優勝予想フォームが非表示になり、
+// ホスト側(handleHostData)でも SUBMIT_PREDICTION が voteState==="PREDICTION" のときしか
+// 受け付けなくなるため、締切後に新たに送られてきた予想は反映されない。
+function endPrediction() {
+  if (room.voteState !== "PREDICTION") return; // 優勝予想受付中でなければ何もしない
+  room.voteState = "WAITING";
   broadcastState();
 }
 
@@ -500,6 +514,7 @@ function updateHostUI() {
 
   // 各操作ボタンの有効/無効を、現在の進行状態(voteState)に応じて切り替える
   const startPredBtn = document.getElementById("btn-start-pred");
+  const endPredBtn = document.getElementById("btn-end-pred");
   const startVoteBtn = document.getElementById("btn-start-vote");
   const endVoteBtn = document.getElementById("btn-end-vote");
   const calcBtn = document.getElementById("btn-calc-result");
@@ -508,6 +523,7 @@ function updateHostUI() {
   if (room.voteState === "TOURNAMENT_ENDED") {
     // 大会終了後は全操作ボタンを無効化
     if (startPredBtn) startPredBtn.disabled = true;
+    if (endPredBtn) endPredBtn.disabled = true;
     if (startVoteBtn) startVoteBtn.disabled = true;
     if (endVoteBtn) endVoteBtn.disabled = true;
     if (calcBtn) calcBtn.disabled = true;
@@ -517,6 +533,8 @@ function updateHostUI() {
     if (startPredBtn)
       startPredBtn.disabled =
         room.voteState === "VOTING" || room.voteState === "CLOSED";
+    // 優勝予想受付中(PREDICTION)以外は「大会優勝予想終了」を無効化
+    if (endPredBtn) endPredBtn.disabled = room.voteState !== "PREDICTION";
     // 投票中は「マッチ投票開始」を無効化（連打で投票がリセットされるのを防止）
     if (startVoteBtn) startVoteBtn.disabled = room.voteState === "VOTING";
     // 投票中以外は「投票締切」を無効化
@@ -651,7 +669,10 @@ function setVoteConnectStatus(text) {
 
 // 「優勝予想を送信」ボタン: 選択中の選手をホストへ優勝予想として送信する
 function submitPrediction() {
-  if (room.voteState === "TOURNAMENT_ENDED") return;
+  // 優勝予想受付中(PREDICTION)以外（締切後・投票中・大会終了後など）は送信できない
+  if (room.voteState !== "PREDICTION") {
+    return alert("現在は大会優勝予想の受付時間ではありません。");
+  }
   if (!selectedPredPlayerId) return alert("選手を選択してください。");
 
   const btn = document.getElementById("btn-submit-pred");
