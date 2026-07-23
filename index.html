@@ -6,13 +6,22 @@
     <title>リアルタイム対戦・投票システム</title>
     <link rel="stylesheet" href="style.css" />
     <!-- PeerJS & QRCode CDN -->
+    <!-- PeerJS: サーバー不要でブラウザ間をWebRTCで直接接続するためのライブラリ（ホスト/クライアント通信の基盤） -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- QRCode.js: ホスト画面で観戦者参加用URLをQRコード画像として生成するライブラリ -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   </head>
 
   <body>
     <div class="container">
-      <!-- TITLE SCREEN -->
+      <!--
+        画面構成メモ:
+        各 .screen 要素はJS(showScreen関数)によって active クラスが
+        付け外しされ、1つの画面だけが表示される簡易SPA構成になっている。
+        画面遷移: TITLE → (HOST / PLAYER / VOTE-LOGIN → VOTE)
+      -->
+
+      <!-- TITLE SCREEN: 最初に表示される役割選択画面（ホスト/プレイヤー/観戦者） -->
       <div id="screen-title" class="screen active">
         <div class="card" style="text-align: center">
           <h1>⚔️ Realtime Tournament</h1>
@@ -34,7 +43,13 @@
         </div>
       </div>
 
-      <!-- HOST SCREEN -->
+      <!--
+        HOST SCREEN: 大会運営者が使う画面。
+        部屋コードの発行・QRコード表示・進行操作（優勝予想開始/投票開始/
+        投票締切/勝者決定/大会終了）を行う「管理画面」。
+        style.css の .screen-host-layout により、PC幅では左右2カラム、
+        スマホ幅では縦1カラムに自動で切り替わる。
+      -->
       <div id="screen-host" class="screen screen-host-layout">
         <!-- 左50%: 参加プレイヤー一覧 & 勝者選択 -->
         <div class="host-left">
@@ -123,7 +138,11 @@
         </div>
       </div>
 
-      <!-- PLAYER SCREEN -->
+      <!--
+        PLAYER SCREEN: 対戦するプレイヤー自身が使う画面。
+        部屋コードと自分の名前を入力してホストへ参加を申請するだけの
+        シンプルな画面（参加後は状態バッジのみ更新される）。
+      -->
       <div id="screen-player" class="screen">
         <div class="card">
           <h2>🎮 プレイヤー画面</h2>
@@ -167,7 +186,10 @@
         </div>
       </div>
 
-      <!-- VOTE LOGIN SCREEN -->
+      <!--
+        VOTE LOGIN SCREEN: 観戦者が部屋コードを入力してホストへ接続するための画面。
+        QRコード経由でアクセスした場合はこの画面を経由せず直接VOTE画面へ遷移する。
+      -->
       <div id="screen-vote-login" class="screen">
         <div class="card">
           <h2>🗳️ 観戦者参加</h2>
@@ -186,7 +208,15 @@
         </div>
       </div>
 
-      <!-- VOTE MAIN SCREEN -->
+      <!--
+        VOTE MAIN SCREEN: 観戦者が使うメイン画面。
+        表示内容はホストからのSYNC_STATE(room.voteState)に応じて
+        JS(updateVoteUI関数)がフォーム/結果表示を動的に切り替える。
+          - 名前未登録なら vote-name-form のみ表示
+          - PREDICTION中は prediction-section を表示
+          - VOTING中は vote-form-area（マッチ投票フォーム）を表示
+          - CLOSED/ENDED/TOURNAMENT_ENDED では vote-result-section に結果を表示
+      -->
       <div id="screen-vote" class="screen">
         <div class="card">
           <div
@@ -208,7 +238,7 @@
           </p>
           <div id="vote-connect-status" class="subtitle"></div>
 
-          <!-- 名前未登録時フォーム -->
+          <!-- 名前未登録時フォーム: 初回参加時のみ表示され、登録後は非表示になる -->
           <div id="vote-name-form" style="display: none">
             <div class="form-group">
               <label>あなたのお名前</label>
@@ -227,9 +257,9 @@
             </button>
           </div>
 
-          <!-- 投票メイン表示エリア -->
+          <!-- 投票メイン表示エリア: 名前登録後に表示されるエリア全体 -->
           <div id="vote-main-section" style="display: none">
-            <!-- 大会優勝予想 -->
+            <!-- 大会優勝予想: PREDICTION状態のときだけJSにより表示される -->
             <div
               id="prediction-section"
               style="
@@ -267,7 +297,7 @@
               </div>
             </div>
 
-            <!-- マッチ投票フォームエリア -->
+            <!-- マッチ投票フォームエリア: VOTING状態のときだけJSにより表示される -->
             <div id="vote-form-area">
               <h3>⚔️ マッチ勝者予想</h3>
               <p class="subtitle">
@@ -294,13 +324,16 @@
               </button>
             </div>
 
-            <!-- 結果・締切・終了表示エリア -->
+            <!-- 結果・締切・終了表示エリア: CLOSED/ENDED/TOURNAMENT_ENDEDの各状態でJSが内容を差し替える -->
             <div id="vote-result-section" style="display: none"></div>
           </div>
         </div>
       </div>
 
-      <!-- HOST RANKING MODAL -->
+      <!--
+        HOST RANKING MODAL: 「ゲーム終了」ボタン押下時にホスト画面へ
+        全画面オーバーレイで表示される最終ランキング（TOP10）モーダル。
+      -->
       <div
         id="ranking-modal"
         style="

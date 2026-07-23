@@ -1,18 +1,20 @@
+/* ===== カラーパレット・共通変数定義 ===== */
 :root {
-  --bg-color: #0f172a;
-  --card-bg: rgba(30, 41, 59, 0.7);
-  --card-border: rgba(255, 255, 255, 0.1);
-  --text-main: #f8fafc;
-  --text-sub: #94a3b8;
-  --primary: #6366f1;
-  --primary-hover: #4f46e5;
-  --success: #10b981;
-  --danger: #ef4444;
-  --warning: #f59e0b;
-  --secondary: #64748b;
-  --radius: 16px;
+  --bg-color: #0f172a; /* 背景色（ダークネイビー） */
+  --card-bg: rgba(30, 41, 59, 0.7); /* カード背景（半透明・すりガラス風） */
+  --card-border: rgba(255, 255, 255, 0.1); /* カード枠線 */
+  --text-main: #f8fafc; /* 基本テキスト色 */
+  --text-sub: #94a3b8; /* 補足テキスト（subtitleなど）の色 */
+  --primary: #6366f1; /* メインカラー（インディゴ） */
+  --primary-hover: #4f46e5; /* メインカラーのホバー時 */
+  --success: #10b981; /* 成功・肯定的な状態の色（緑） */
+  --danger: #ef4444; /* 危険・終了・外れなどの色（赤） */
+  --warning: #f59e0b; /* 注意・締切などの色（オレンジ） */
+  --secondary: #64748b; /* サブボタンなどの色（グレー） */
+  --radius: 16px; /* カードの角丸半径 */
 }
 
+/* 全要素共通リセット + 基本フォント指定 */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -21,6 +23,7 @@
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+/* ページ全体: 中央寄せレイアウト + 背景に円形グラデーション */
 body {
   background: var(--bg-color);
   color: var(--text-main);
@@ -36,15 +39,16 @@ body {
   );
 }
 
+/* コンテンツ全体の最大幅を制限するラッパー */
 .container {
   width: 100%;
   max-width: 1100px;
 }
 
-/* Card UI */
+/* Card UI: 各画面の情報をまとめる基本カードコンポーネント */
 .card {
   background: var(--card-bg);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px); /* すりガラス効果 */
   border: 1px solid var(--card-border);
   border-radius: var(--radius);
   padding: 1.5rem;
@@ -60,6 +64,7 @@ h3 {
   font-weight: 700;
 }
 
+/* 見出し下の補足説明テキスト */
 .subtitle {
   color: var(--text-sub);
   font-size: 0.875rem;
@@ -67,7 +72,7 @@ h3 {
   margin-bottom: 1.5rem;
 }
 
-/* Screen切り替え */
+/* Screen切り替え: JS側でactiveクラスを付け替えて表示画面を切り替える仕組み */
 .screen {
   display: none;
 }
@@ -76,7 +81,8 @@ h3 {
   display: block;
 }
 
-/* Host Screen 左右50% / 50% レイアウトの厳格化 */
+/* Host Screen 左右50% / 50% レイアウトの厳格化
+   （.screen.active の display:block を上書きしてgridレイアウトを強制適用） */
 .screen-host-layout.active {
   display: grid !important;
   grid-template-columns: 1fr 1fr;
@@ -91,6 +97,7 @@ h3 {
   gap: 1rem;
 }
 
+/* スマホなど狭い画面では左右2カラムを1カラムに切り替える */
 @media (max-width: 768px) {
   .screen-host-layout.active {
     grid-template-columns: 1fr !important;
@@ -122,11 +129,13 @@ input[type="number"] {
   transition: all 0.2s;
 }
 
+/* 入力欄フォーカス時に枠線をハイライトする */
 input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
+/* ホスト画面に表示する部屋の参加コード（大きく強調表示） */
 .room-code-display {
   font-size: 1.8rem;
   font-weight: bold;
@@ -135,7 +144,7 @@ input:focus {
   color: var(--primary);
 }
 
-/* Buttons */
+/* Buttons: 共通の見た目（色は各バリエーションクラスで指定） */
 .btn {
   width: 100%;
   padding: 0.85rem;
@@ -151,6 +160,8 @@ input:focus {
   gap: 0.5rem;
 }
 
+/* ボタンの色バリエーション: 用途ごとに使い分ける
+   primary=通常操作 / success=肯定的な確定操作 / danger=終了系 / warning=締切系 / secondary=補助操作 */
 .btn-primary {
   background: var(--primary);
   color: #fff;
@@ -185,7 +196,7 @@ input:focus {
   cursor: not-allowed;
 }
 
-/* Badge */
+/* Badge: 進行状態（WAITING/VOTING/ENDEDなど）を示す小さなラベル */
 .badge {
   display: inline-block;
   padding: 0.25rem 0.75rem;
@@ -210,7 +221,7 @@ input:focus {
   color: var(--danger);
 }
 
-/* List Item */
+/* List Item: プレイヤー一覧・投票選択肢などの1行分の共通スタイル */
 .list-item {
   display: flex;
   justify-content: space-between;
@@ -222,24 +233,26 @@ input:focus {
   margin-bottom: 0.5rem;
 }
 
+/* タップして選択できる項目（勝者選択・投票選択・優勝予想選択で使用） */
 .selectable-item {
   cursor: pointer;
   transition: all 0.2s;
 }
 
+/* 選択中(active)またはホバー時のハイライト表示 */
 .selectable-item:hover,
 .selectable-item.active {
   border-color: var(--primary);
   background: rgba(99, 102, 241, 0.15);
 }
 
-/* QR Code */
+/* QR Code: ホスト画面に表示する観戦者参加用QRコードの枠 */
 #qrcode-container {
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 1rem;
-  background: #fff;
+  background: #fff; /* QRコードは白背景の方が読み取りやすいため明示的に白背景にする */
   border-radius: 12px;
   margin: 1rem 0;
 }
@@ -256,6 +269,7 @@ input:focus {
   font-weight: bold;
 }
 
+/* 観戦者画面の所持ポイント表示（大きく目立たせる） */
 .point-display {
   font-size: 2rem;
   font-weight: 800;
