@@ -73,6 +73,16 @@
               状態: WAITING
             </div>
 
+            <!-- 観戦者(投票者)の参加人数・今ラウンドの投票済み人数をリアルタイム表示 -->
+            <div
+              id="host-vote-stats"
+              class="subtitle"
+              style="margin-bottom: 1rem; text-align: center"
+            >
+              観戦者参加人数: <strong id="host-voter-count">0</strong>人 ／
+              投票済み: <strong id="host-voted-count">0</strong>人
+            </div>
+
             <div class="form-group">
               <label>参加コード</label>
               <div class="room-code-display" id="host-room-code">------</div>
@@ -134,6 +144,20 @@
                 ゲーム終了
               </button>
             </div>
+          </div>
+
+          <!--
+            大会優勝者選択カード:
+            大会全体の優勝者をタップで選択する。「ゲーム終了」ボタンを押した際、
+            ここで選択された優勝者IDが room.tournamentWinnerId として使われ、
+            優勝予想(tournamentPredId)が一致していた観戦者に100ptが付与される。
+          -->
+          <div class="card">
+            <h3>🏆 大会優勝者選択</h3>
+            <p class="subtitle">
+              大会全体の優勝者をタップで選択してください（「ゲーム終了」時に優勝予想が的中した観戦者へ100pt付与されます）
+            </p>
+            <div id="host-champion-list"></div>
           </div>
         </div>
       </div>

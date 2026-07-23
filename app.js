@@ -32,6 +32,7 @@ let room = {
   votes: [], // 今ラウンドの投票一覧 [{ viewerId, playerId, betPoint }]
   selectedWinnerId: null, // ホストが選択した勝者プレイヤーID
   roundId: null, // 現在のマッチ投票ラウンドID（startVotingのたびに再生成）
+  tournamentWinnerId: null, // 大会全体の優勝者として選択されたプレイヤーID（ゲーム終了時の100pt付与に使用）
 };
 
 // --- 観戦者画面のUI選択状態（ローカルのみ、サーバーには送らない） ---
@@ -335,7 +336,19 @@ function excludePlayer(playerId) {
   if (room.selectedWinnerId === playerId) {
     room.selectedWinnerId = null;
   }
+  // 除外したプレイヤーが大会優勝者候補として選択中だった場合も選択を解除する
+  if (room.tournamentWinnerId === playerId) {
+    room.tournamentWinnerId = null;
+  }
 
+  broadcastState();
+}
+
+// 大会優勝者選択カードでプレイヤーをタップしたときの処理
+// ここで選択されたIDが、endTournament()実行時の100pt付与判定に使われる
+function selectChampion(playerId) {
+  if (room.voteState === "TOURNAMENT_ENDED") return;
+  room.tournamentWinnerId = playerId;
   broadcastState();
 }
 
@@ -363,8 +376,21 @@ function announceWinner() {
   broadcastState();
 }
 
-// 「ゲーム終了」ボタン: 大会全体を終了し、最終ランキングを表示する
+// 「ゲーム終了」ボタン: 大会全体を終了し、優勝予想が的中した観戦者に100ptを付与したうえで最終ランキングを表示する
 function endTournament() {
+  if (!room.tournamentWinnerId) {
+    return alert(
+      "先に「大会優勝者選択」から大会全体の優勝者を選んでください。",
+    );
+  }
+
+  // 大会優勝予想(tournamentPredId)が優勝者と一致していた観戦者に100ptを付与する
+  room.voters.forEach((v) => {
+    if (v.tournamentPredId === room.tournamentWinnerId) {
+      v.points += 100;
+    }
+  });
+
   room.voteState = "TOURNAMENT_ENDED";
   broadcastState();
   showRankingModal();
@@ -443,6 +469,33 @@ function updateHostUI() {
   const badge = document.getElementById("host-state-badge");
   if (badge) {
     badge.innerText = "状態: " + room.voteState;
+  }
+
+  // 観戦者の参加人数・今ラウンドの投票済み人数を更新
+  // （room.voters=登録済み観戦者全員、room.votes=今ラウンドで投票済みの人。votesはstartVoting時にリセットされる）
+  const voterCountEl = document.getElementById("host-voter-count");
+  const votedCountEl = document.getElementById("host-voted-count");
+  if (voterCountEl) voterCountEl.innerText = room.voters.length;
+  if (votedCountEl) votedCountEl.innerText = room.votes.length;
+
+  // 大会優勝者選択リストを描画（タップで room.tournamentWinnerId を設定する）
+  const championList = document.getElementById("host-champion-list");
+  if (championList) {
+    if (room.players.length === 0) {
+      championList.innerHTML =
+        '<p class="subtitle">プレイヤーの参加を待っています...</p>';
+    } else {
+      championList.innerHTML = room.players
+        .map((p) => {
+          const isChampion = room.tournamentWinnerId === p.id;
+          return `
+                  <div class="list-item selectable-item ${isChampion ? "active" : ""}" onclick="selectChampion('${p.id}')">
+                    <span><strong>${escapeHtml(p.name)}</strong></span>
+                    ${isChampion ? '<span class="badge badge-success">優勝者選択中</span>' : ""}
+                  </div>`;
+        })
+        .join("");
+    }
   }
 
   // 各操作ボタンの有効/無効を、現在の進行状態(voteState)に応じて切り替える
@@ -689,8 +742,24 @@ function renderTournamentEndedUI() {
   const sortedVoters = [...room.voters].sort((a, b) => b.points - a.points);
   const myRankIndex = sortedVoters.findIndex((v) => v.id === viewerId);
   const myRankText = myRankIndex !== -1 ? `${myRankIndex + 1}位` : "圏外";
-  const championText =
-    sortedVoters.length > 0 ? escapeHtml(sortedVoters[0].name) : "なし";
+
+  // 大会優勝者はホストが選択したtournamentWinnerIdから取得する
+  const championPlayer = room.players.find(
+    (p) => p.id === room.tournamentWinnerId,
+  );
+  const championText = championPlayer
+    ? escapeHtml(championPlayer.name)
+    : "なし";
+
+  // 自分の優勝予想が的中していたかどうかを表示する（的中していれば100pt獲得済み）
+  const myVoter = room.voters.find((v) => v.id === viewerId);
+  let predResultHtml = "";
+  if (myVoter && myVoter.tournamentPredId) {
+    const isPredCorrect = myVoter.tournamentPredId === room.tournamentWinnerId;
+    predResultHtml = isPredCorrect
+      ? '<div style="font-size: 1rem; color: var(--success); font-weight: bold; margin-top: 0.5rem;">🎯 優勝予想的中！ +100pt</div>'
+      : '<div style="font-size: 1rem; color: var(--text-sub); margin-top: 0.5rem;">優勝予想は外れました</div>';
+  }
 
   const top10 = sortedVoters.slice(0, 10);
   const rankingItemsHtml =
@@ -719,6 +788,8 @@ function renderTournamentEndedUI() {
                 
                 <div style="font-size: 0.85rem; color: var(--text-sub); margin-top: 0.8rem;">優勝</div>
                 <div style="font-size: 1.4rem; font-weight: bold; color: #fbbf24;">${championText}</div>
+
+                ${predResultHtml}
             </div>
 
             <h3 style="margin-bottom: 0.8rem;">🏆 TOP10 ランキング</h3>
