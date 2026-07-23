@@ -6,7 +6,8 @@
 // SYNC_STATE として配信（ブロードキャスト）する「ホスト権威モデル」。
 // =====================================================================
 
-// 観戦者の初期所持ポイント
+// 大会優勝予想を送信すると観戦者が獲得する参加ポイント
+// （登録しただけでは付与されず、予想せずにいると0ptのままでマッチ投票にも参加できない）
 const INITIAL_POINTS = 50;
 
 // --- PeerJS関連のグローバル状態 ---
@@ -16,7 +17,7 @@ let hostConn = null; // [クライアント用] ホストとの単一のDataConn
 
 // --- 観戦者(投票者)のローカル状態。localStorageで再読込後も維持する ---
 let voterName = ""; // 観戦者の表示名
-let viewerPoints = INITIAL_POINTS; // 自分の所持ポイント（ホストからの同期で更新される）
+let viewerPoints = 0; // 自分の所持ポイント（ホストからの同期で更新される。優勝予想を送信するまでは0）
 let viewerId = ""; // 自分を識別するID（ランダム生成しlocalStorageに保存）
 
 // マッチ投票のラウンドを識別するID。変わったら新しい投票が始まったと判断する
@@ -33,6 +34,7 @@ let room = {
   selectedWinnerId: null, // ホストが選択した勝者プレイヤーID
   roundId: null, // 現在のマッチ投票ラウンドID（startVotingのたびに再生成）
   tournamentWinnerId: null, // 大会全体の優勝者として選択されたプレイヤーID（ゲーム終了時の100pt付与に使用）
+  predictionEnded: false, // 大会優勝予想の受付を締め切ったかどうか（trueになったら新規観戦者の参加を拒否する）
 };
 
 // --- 観戦者画面のUI選択状態（ローカルのみ、サーバーには送らない） ---
@@ -150,7 +152,7 @@ window.addEventListener("DOMContentLoaded", () => {
     localStorage.removeItem("viewer_id");
 
     voterName = "";
-    viewerPoints = INITIAL_POINTS;
+    viewerPoints = 0;
     viewerId = "viewer_" + Math.random().toString(36).substring(2, 9);
     localStorage.setItem("viewer_id", viewerId);
     localStorage.setItem("viewer_points", viewerPoints);
@@ -162,8 +164,7 @@ window.addEventListener("DOMContentLoaded", () => {
       localStorage.getItem("viewer_id") ||
       "viewer_" + Math.random().toString(36).substring(2, 9);
     voterName = localStorage.getItem("voter_name") || "";
-    viewerPoints =
-      parseInt(localStorage.getItem("viewer_points")) || INITIAL_POINTS;
+    viewerPoints = parseInt(localStorage.getItem("viewer_points")) || 0;
     localStorage.setItem("viewer_id", viewerId);
 
     showScreen("screen-title");
@@ -229,27 +230,39 @@ function handleHostData(conn, data) {
     case "REGISTER_VOTER":
       let v = room.voters.find((x) => x.id === payload.id);
       if (!v) {
-        // 新規登録: 初期ポイントを付与
+        // 大会優勝予想の受付を締め切った後は、新規観戦者の参加を拒否する
+        // （QRコードを読み込んでも締切後は登録できないようにするための制御）
+        if (room.predictionEnded) {
+          conn.send({ type: "REGISTRATION_CLOSED" });
+          break;
+        }
+        // 新規登録: ポイントは0から開始（優勝予想を送信した時点で50pt付与される）
         room.voters.push({
           id: payload.id,
           name: payload.name,
-          points: INITIAL_POINTS,
+          points: 0,
           tournamentPredId: null,
         });
       } else {
-        // 既存観戦者の名前だけ更新（再接続時など）
+        // 既存観戦者の名前だけ更新（再接続時など。既に登録済みなので締切後でも許可する）
         v.name = payload.name;
       }
       broadcastState();
       break;
 
-    // 大会優勝予想を送信してきたとき
     // 大会優勝予想を送信してきたとき（優勝予想受付中(PREDICTION)のときだけ受け付ける。
     // 「大会優勝予想終了」で締め切った後に届いた予想は無視する）
     case "SUBMIT_PREDICTION":
       if (room.voteState === "PREDICTION") {
         let voterP = room.voters.find((x) => x.id === payload.viewerId);
-        if (voterP) voterP.tournamentPredId = payload.predPlayerId;
+        if (voterP) {
+          // 初めて優勝予想を送信したときだけ参加ポイント(50pt)を付与する
+          // （予想を変更しただけの再送信では二重付与しない）
+          if (voterP.tournamentPredId === null) {
+            voterP.points += INITIAL_POINTS;
+          }
+          voterP.tournamentPredId = payload.predPlayerId;
+        }
         broadcastState();
       }
       break;
@@ -306,6 +319,7 @@ function startPrediction() {
 function endPrediction() {
   if (room.voteState !== "PREDICTION") return; // 優勝予想受付中でなければ何もしない
   room.voteState = "WAITING";
+  room.predictionEnded = true; // 以降、新規観戦者の登録(REGISTER_VOTER)を拒否する
   broadcastState();
 }
 
@@ -603,6 +617,16 @@ function handleClientData(data) {
     }
 
     updateVoteUI();
+  } else if (data.type === "REGISTRATION_CLOSED") {
+    // ホストが優勝予想の受付を締め切った後に、新規観戦者として登録しようとした場合の応答
+    setVoteConnectStatus(
+      "⚠ 大会優勝予想の受付は終了したため、新規参加はできません。",
+    );
+    const btn = document.getElementById("btn-register-voter");
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = "参加受付終了";
+    }
   }
 }
 
@@ -683,7 +707,7 @@ function submitPrediction() {
     type: "SUBMIT_PREDICTION",
     payload: { viewerId, predPlayerId: selectedPredPlayerId },
   });
-  alert("大会優勝予想を送信しました！");
+  alert("大会優勝予想を送信しました！参加ポイント50ptを獲得しました。");
   document.getElementById("prediction-section").style.display = "none";
 }
 
